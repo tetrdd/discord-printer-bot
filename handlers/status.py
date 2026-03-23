@@ -1,0 +1,257 @@
+"""
+Main menu and status commands for Discord Printer Bot.
+"""
+from __future__ import annotations
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+from typing import Optional
+import asyncio
+
+import config
+import api
+import permissions
+
+
+class StatusCog(commands.Cog):
+    """Status and main menu commands."""
+    
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self._auto_refresh_tasks = {}  # {(channel_id, message_id): asyncio.Task}
+    
+    @app_commands.command(name="status", description="Get printer status")
+    async def status(self, interaction: discord.Interaction):
+        """Show current printer status."""
+        user_id = interaction.user.id
+        
+        try:
+            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+        except permissions.PermissionError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        
+        status_data = await api.printer_status(user_id)
+        printer_name = config.active_printer_name(user_id)
+        
+        if not status_data:
+            await interaction.followup.send(
+                "❌ Could not connect to printer. Is it online?",
+                ephemeral=True,
+            )
+            return
+        
+        embed = self._build_status_embed(status_data, printer_name)
+        
+        view = StatusView(user_id, self._auto_refresh_tasks)
+        await interaction.followup.send(embed=embed, view=view)
+    
+    @app_commands.command(name="menu", description="Show main menu")
+    async def menu(self, interaction: discord.Interaction):
+        """Show the main menu."""
+        user_id = interaction.user.id
+        
+        try:
+            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+        except permissions.PermissionError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        
+        printer_name = config.active_printer_name(user_id)
+        
+        embed = discord.Embed(
+            title=f"🖨️ {printer_name}",
+            description="Select an option:",
+            color=0x0099FF,
+        )
+        
+        view = MenuView(user_id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    
+    def _build_status_embed(self, status: dict, printer_name: str) -> discord.Embed:
+        """Build a status embed from printer data."""
+        # Extract data based on API type
+        if "print_stats" in status:
+            # Moonraker format
+            stats = status.get("print_stats", {})
+            vsd = status.get("virtual_sdcard", {})
+            ext = status.get("extruder", {})
+            bed = status.get("heater_bed", {})
+            fan = status.get("fan", {})
+            display = status.get("display_status", {})
+            
+            state = stats.get("state", "unknown")
+            filename = stats.get("filename", "—") or "—"
+            pct = display.get("progress", vsd.get("progress", 0)) * 100
+            duration = stats.get("print_duration", 0)
+            filament = stats.get("filament_used", 0) / 1000
+            
+            ext_temp = ext.get("temperature", 0)
+            ext_target = ext.get("target", 0)
+            bed_temp = bed.get("temperature", 0)
+            bed_target = bed.get("target", 0)
+            fan_speed = round(fan.get("speed", 0) * 100)
+        else:
+            # OctoPrint format
+            state = status.get("state", "unknown")
+            filename = status.get("file", "—") or "—"
+            pct = status.get("progress", 0) * 100
+            duration = status.get("elapsed_time", 0) or 0
+            filament = 0
+            
+            temps = status.get("temperatures", {})
+            ext_temp = temps.get("tool0", {}).get("actual", 0) if temps else 0
+            ext_target = temps.get("tool0", {}).get("target", 0) if temps else 0
+            bed_temp = temps.get("bed", {}).get("actual", 0) if temps else 0
+            bed_target = temps.get("bed", {}).get("target", 0) if temps else 0
+            fan_speed = 0
+        
+        # Calculate ETA
+        eta_str = "—"
+        if pct > 1 and state == "printing":
+            if duration > 0:
+                remaining = (duration / (pct / 100)) - duration
+                eta_str = f"~{self._format_duration(remaining)}"
+        
+        # Progress bar
+        bar_length = 10
+        filled = int(bar_length * pct / 100)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        
+        # State emoji
+        state_emoji = {
+            "printing": "🖨️",
+            "paused": "⏸️",
+            "complete": "✅",
+            "cancelled": "❌",
+            "error": "⚠️",
+            "standby": "💤",
+        }.get(state, "❓")
+        
+        embed = discord.Embed(
+            title=f"{state_emoji} {printer_name}",
+            color=self._get_state_color(state),
+        )
+        
+        embed.add_field(name="📄 File", value=f"`{filename}`", inline=False)
+        embed.add_field(name="📊 Progress", value=f"[{bar}] {pct:.1f}%", inline=False)
+        embed.add_field(name="⏱️ Duration", value=self._format_duration(duration), inline=True)
+        embed.add_field(name="⏰ ETA", value=eta_str, inline=True)
+        embed.add_field(name="🧵 Filament", value=f"{filament:.2f}m", inline=True)
+        
+        embed.add_field(
+            name="🌡️ Hotend",
+            value=f"{ext_temp:.1f}°C → {ext_target:.0f}°C",
+            inline=True,
+        )
+        embed.add_field(
+            name="🌡️ Bed",
+            value=f"{bed_temp:.1f}°C → {bed_target:.0f}°C",
+            inline=True,
+        )
+        embed.add_field(name="💨 Fan", value=f"{fan_speed}%", inline=True)
+        
+        embed.set_footer(text=f"State: {state}")
+        
+        return embed
+    
+    def _format_duration(self, seconds: float) -> str:
+        """Format duration in seconds to human readable string."""
+        if not seconds or seconds < 0:
+            return "0s"
+        
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        elif minutes > 0:
+            return f"{minutes}m {secs}s"
+        else:
+            return f"{secs}s"
+    
+    def _get_state_color(self, state: str) -> int:
+        """Get embed color based on printer state."""
+        colors = {
+            "printing": 0x00FF00,
+            "paused": 0xFFA500,
+            "complete": 0x00FF00,
+            "cancelled": 0xFF0000,
+            "error": 0xFF0000,
+            "standby": 0x808080,
+        }
+        return colors.get(state, 0x0099FF)
+
+
+class MenuView(discord.ui.View):
+    """Main menu view with buttons."""
+    
+    def __init__(self, user_id: int):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+    
+    @discord.ui.button(label="📊 Status", style=discord.ButtonStyle.primary)
+    async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/status` to see printer status.", ephemeral=True)
+    
+    @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
+    async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/control` for print controls.", ephemeral=True)
+    
+    @discord.ui.button(label="🌡️ Temperatures", style=discord.ButtonStyle.secondary)
+    async def temps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/temperatures` to control temps.", ephemeral=True)
+    
+    @discord.ui.button(label="📁 Files", style=discord.ButtonStyle.secondary)
+    async def files_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/files` to browse files.", ephemeral=True)
+    
+    @discord.ui.button(label="📷 Camera", style=discord.ButtonStyle.secondary)
+    async def camera_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/camera` for snapshots.", ephemeral=True)
+
+
+class StatusView(discord.ui.View):
+    """Status view with action buttons."""
+    
+    def __init__(self, user_id: int, auto_refresh_tasks: dict):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+        self.auto_refresh_tasks = auto_refresh_tasks
+        self.is_refreshing = False
+    
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        
+        status_data = await api.printer_status(self.user_id)
+        printer_name = config.active_printer_name(self.user_id)
+        
+        if not status_data:
+            await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
+            return
+        
+        cog = interaction.client.get_cog("StatusCog")
+        if cog:
+            embed = cog._build_status_embed(status_data, printer_name)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
+    async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/control` for print controls.", ephemeral=True)
+    
+    @discord.ui.button(label="🔧 Adjust", style=discord.ButtonStyle.secondary)
+    async def adjust_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/adjust` for speed/flow/fan adjustments.", ephemeral=True)
+    
+    @discord.ui.button(label="📷 Snapshot", style=discord.ButtonStyle.secondary)
+    async def snapshot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Use `/camera` for snapshots.", ephemeral=True)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(StatusCog(bot))
