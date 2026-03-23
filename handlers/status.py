@@ -9,7 +9,7 @@ from discord.ext import commands
 from typing import Optional
 import asyncio
 
-import config
+import db
 import api
 import permissions
 
@@ -25,9 +25,10 @@ class StatusCog(commands.Cog):
     async def status(self, interaction: discord.Interaction):
         """Show current printer status."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_view_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -35,7 +36,8 @@ class StatusCog(commands.Cog):
         await interaction.response.defer()
         
         status_data = await api.printer_status(user_id)
-        printer_name = config.active_printer_name(user_id)
+        active_printer = db.get_active_printer(user_id)
+        printer_name = active_printer['name'] if active_printer else "Printer"
         
         if not status_data:
             await interaction.followup.send(
@@ -53,14 +55,16 @@ class StatusCog(commands.Cog):
     async def menu(self, interaction: discord.Interaction):
         """Show the main menu."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_view_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        printer_name = config.active_printer_name(user_id)
+        active_printer = db.get_active_printer(user_id)
+        printer_name = active_printer['name'] if active_printer else "Printer"
         
         embed = discord.Embed(
             title=f"🖨️ {printer_name}",
@@ -129,11 +133,11 @@ class StatusCog(commands.Cog):
             "cancelled": "❌",
             "error": "⚠️",
             "standby": "💤",
-        }.get(state, "❓")
+        }.get(state.lower(), "❓")
         
         embed = discord.Embed(
             title=f"{state_emoji} {printer_name}",
-            color=self._get_state_color(state),
+            color=self._get_state_color(state.lower()),
         )
         
         embed.add_field(name="📄 File", value=f"`{filename}`", inline=False)
@@ -222,14 +226,14 @@ class StatusView(discord.ui.View):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.auto_refresh_tasks = auto_refresh_tasks
-        self.is_refreshing = False
     
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         
         status_data = await api.printer_status(self.user_id)
-        printer_name = config.active_printer_name(self.user_id)
+        active_printer = db.get_active_printer(self.user_id)
+        printer_name = active_printer['name'] if active_printer else "Printer"
         
         if not status_data:
             await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
@@ -238,7 +242,7 @@ class StatusView(discord.ui.View):
         cog = interaction.client.get_cog("StatusCog")
         if cog:
             embed = cog._build_status_embed(status_data, printer_name)
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.edit_original_response(embed=embed)
     
     @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
     async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):

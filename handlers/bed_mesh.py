@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import config
+import db
 import api
 import permissions
 
@@ -22,9 +22,10 @@ class BedMeshCog(commands.Cog):
     async def bed_mesh(self, interaction: discord.Interaction):
         """View bed mesh profile data."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -71,6 +72,9 @@ class BedMeshCog(commands.Cog):
         embed.add_field(name="📊 Range", value=f"{range_z:.4f}mm", inline=True)
         
         if mesh_text:
+            # Discord has a limit for field length, truncate if needed
+            if len(mesh_text) > 1000:
+                mesh_text = mesh_text[:997] + "..."
             embed.add_field(
                 name="🔢 Mesh Values (mm)",
                 value=f"```\n{mesh_text}\n```",

@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import config
+import db
 import api
 import permissions
 
@@ -23,9 +23,10 @@ class ControlCog(commands.Cog):
     async def control(self, interaction: discord.Interaction):
         """Show print control menu."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -52,9 +53,10 @@ class ControlCog(commands.Cog):
     async def pause(self, interaction: discord.Interaction):
         """Pause the current print."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -72,9 +74,10 @@ class ControlCog(commands.Cog):
     async def resume(self, interaction: discord.Interaction):
         """Resume a paused print."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -92,9 +95,10 @@ class ControlCog(commands.Cog):
     async def cancel(self, interaction: discord.Interaction):
         """Cancel the current print with confirmation."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -110,9 +114,10 @@ class ControlCog(commands.Cog):
     async def home(self, interaction: discord.Interaction, axes: str = "XYZ"):
         """Home specified axes (default: XYZ)."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -137,9 +142,10 @@ class ControlCog(commands.Cog):
     async def motors_off(self, interaction: discord.Interaction):
         """Disable all stepper motors."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -157,11 +163,12 @@ class ControlCog(commands.Cog):
     async def estop(self, interaction: discord.Interaction):
         """Emergency stop the printer."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         # E-stop doesn't require control permission - it's always available
         # But user must have at least view access
         try:
-            permissions.check_view_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_view_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -196,8 +203,6 @@ class ControlView(discord.ui.View):
             "✅ Paused" if result else "❌ Failed",
             ephemeral=True,
         )
-        # Refresh the view
-        await self.refresh_view(interaction)
     
     @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success)
     async def resume_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -207,7 +212,6 @@ class ControlView(discord.ui.View):
             "✅ Resumed" if result else "❌ Failed",
             ephemeral=True,
         )
-        await self.refresh_view(interaction)
     
     @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.danger)
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -233,21 +237,6 @@ class ControlView(discord.ui.View):
             "✅ Disabled" if result else "❌ Failed",
             ephemeral=True,
         )
-    
-    async def refresh_view(self, interaction: discord.Interaction):
-        """Refresh the control view with updated state."""
-        status_data = await api.printer_status(self.user_id)
-        if status_data:
-            if "print_stats" in status_data:
-                self.state = status_data.get("print_stats", {}).get("state", "unknown")
-            else:
-                self.state = status_data.get("state", "unknown")
-        
-        self.pause_btn.disabled = self.state != "printing"
-        self.resume_btn.disabled = self.state != "paused"
-        self.cancel_btn.disabled = self.state not in ["printing", "paused"]
-        
-        await interaction.edit_original_response(view=self)
 
 
 class CancelConfirmView(discord.ui.View):

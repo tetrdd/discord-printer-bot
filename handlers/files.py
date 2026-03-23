@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
-import config
+import db
 import api
 import permissions
 
@@ -25,9 +25,10 @@ class FilesCog(commands.Cog):
     async def files(self, interaction: discord.Interaction, page: Optional[int] = 1):
         """Browse G-code files on the printer."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -41,16 +42,9 @@ class FilesCog(commands.Cog):
             return
         
         # Sort files by modification time (newest first)
-        files_cfg = config.files_config()
-        sort_by = files_cfg.get("sort_by", "modified")
-        sort_order = files_cfg.get("sort_order", "desc")
+        files.sort(key=lambda x: x.get("modified", 0), reverse=True)
         
-        if sort_by == "modified":
-            files.sort(key=lambda x: x.get("modified', 0), reverse=(sort_order == "desc"))
-        elif sort_by == "name":
-            files.sort(key=lambda x: x.get("path", ""), reverse=(sort_order == "desc"))
-        
-        files_per_page = files_cfg.get("files_per_page", 10)
+        files_per_page = 10
         total_pages = (len(files) + files_per_page - 1) // files_per_page
         
         if page < 1:
@@ -92,9 +86,10 @@ class FilesCog(commands.Cog):
     async def print_file(self, interaction: discord.Interaction, filename: str):
         """Start printing a specific file."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -113,9 +108,10 @@ class FilesCog(commands.Cog):
     async def delete_file(self, interaction: discord.Interaction, filename: str):
         """Delete a specific file."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -132,9 +128,10 @@ class FilesCog(commands.Cog):
     async def file_info(self, interaction: discord.Interaction, filename: str):
         """Get detailed information about a file."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -227,13 +224,6 @@ class FilesView(discord.ui.View):
     async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             f"Use `/files page:{self.page + 1}`",
-            ephemeral=True,
-        )
-    
-    @discord.ui.button(label="🖨️ Print Selected", style=discord.ButtonStyle.primary)
-    async def print_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Use `/print filename:<name>` to start printing.",
             ephemeral=True,
         )
 

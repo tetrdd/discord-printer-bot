@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
-import config
+import db
 import api
 import permissions
 
@@ -25,9 +25,10 @@ class MacrosCog(commands.Cog):
     async def macros(self, interaction: discord.Interaction, page: Optional[int] = 1):
         """List available Klipper macros."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -43,13 +44,9 @@ class MacrosCog(commands.Cog):
             )
             return
         
-        # Apply aliases from config
-        macros_cfg = config.macros_config()
-        aliases = macros_cfg.get("aliases", {})
-        per_page = macros_cfg.get("per_page", 10)
-        
         # Sort and paginate
         macros.sort()
+        per_page = 10
         total_pages = (len(macros) + per_page - 1) // per_page
         
         if page < 1:
@@ -70,10 +67,9 @@ class MacrosCog(commands.Cog):
         )
         
         for macro in page_macros:
-            display_name = aliases.get(macro, macro)
             embed.add_field(
-                name=f"🔹 {display_name}",
-                value=f"`/{macro}`",
+                name=f"🔹 {macro}",
+                value=f"Use `/run-macro macro:{macro}`",
                 inline=True,
             )
         
@@ -85,9 +81,10 @@ class MacrosCog(commands.Cog):
     async def run_macro(self, interaction: discord.Interaction, macro: str):
         """Run a specific macro."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -125,13 +122,6 @@ class MacrosView(discord.ui.View):
     async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             f"Use `/macros page:{self.page + 1}`",
-            ephemeral=True,
-        )
-    
-    @discord.ui.button(label="▶️ Run Selected", style=discord.ButtonStyle.primary)
-    async def run_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Use `/run-macro macro:<name>` to run a macro.",
             ephemeral=True,
         )
 

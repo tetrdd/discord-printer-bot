@@ -7,8 +7,9 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 from discord.ext import commands
+from typing import Optional
 
-import config
+import db
 import api
 import permissions
 
@@ -23,9 +24,10 @@ class AdjustCog(commands.Cog):
     async def adjust(self, interaction: discord.Interaction):
         """Show adjustment menu."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -44,9 +46,10 @@ class AdjustCog(commands.Cog):
     async def speed(self, interaction: discord.Interaction, percentage: int):
         """Set print speed override percentage."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -72,9 +75,10 @@ class AdjustCog(commands.Cog):
     async def flow(self, interaction: discord.Interaction, percentage: int):
         """Set print flow override percentage."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -100,9 +104,10 @@ class AdjustCog(commands.Cog):
     async def fan(self, interaction: discord.Interaction, percentage: int):
         """Set part cooling fan speed."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -136,9 +141,10 @@ class AdjustCog(commands.Cog):
     ):
         """Adjust Z-offset."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return

@@ -37,10 +37,17 @@ def init_db():
                 discord_id INTEGER PRIMARY KEY,
                 timezone TEXT,
                 language TEXT,
-                notify_channel TEXT
+                notify_channel TEXT,
+                active_printer_id INTEGER
             )
         ''')
         
+        # Check for user columns (migration)
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'active_printer_id' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN active_printer_id INTEGER")
+
         # Printers table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS printers (
@@ -52,10 +59,20 @@ def init_db():
                 api_key TEXT,
                 privacy TEXT CHECK(privacy IN ('public','private')),
                 creation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                camera_url TEXT,
+                stream_url TEXT,
                 FOREIGN KEY (owner_discord_id) REFERENCES users(discord_id)
             )
         ''')
         
+        # Check for printer columns (migration)
+        cursor.execute("PRAGMA table_info(printers)")
+        p_columns = [column[1] for column in cursor.fetchall()]
+        if 'camera_url' not in p_columns:
+            cursor.execute("ALTER TABLE printers ADD COLUMN camera_url TEXT")
+        if 'stream_url' not in p_columns:
+            cursor.execute("ALTER TABLE printers ADD COLUMN stream_url TEXT")
+
         # Printer allowed users table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS printer_allowed_users (
@@ -67,6 +84,18 @@ def init_db():
             )
         ''')
         
+        # Temperature presets table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS temp_presets (
+                preset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_discord_id INTEGER,
+                name TEXT NOT NULL,
+                hotend_temp INTEGER NOT NULL,
+                bed_temp INTEGER NOT NULL,
+                FOREIGN KEY (user_discord_id) REFERENCES users(discord_id)
+            )
+        ''')
+
         # Index for faster lookups
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_printers_owner 
@@ -78,6 +107,11 @@ def init_db():
             ON printer_allowed_users(user_discord_id)
         ''')
         
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_temp_presets_user
+            ON temp_presets(user_discord_id)
+        ''')
+
         conn.commit()
         
     logger.info("Database initialized successfully")
@@ -105,9 +139,14 @@ def create_user(
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                INSERT OR REPLACE INTO users (discord_id, timezone, language, notify_channel)
+                INSERT OR IGNORE INTO users (discord_id, timezone, language, notify_channel)
                 VALUES (?, ?, ?, ?)
             ''', (discord_id, timezone, language, notify_channel))
+
+            # If inserted, add default presets
+            if cursor.rowcount > 0:
+                _add_default_presets(discord_id, cursor)
+
             conn.commit()
             return True
         except sqlite3.Error as e:
@@ -115,11 +154,26 @@ def create_user(
             return False
 
 
+def _add_default_presets(user_id: int, cursor: sqlite3.Cursor):
+    """Add default temperature presets for a new user."""
+    defaults = [
+        ('PLA', 200, 60),
+        ('PETG', 230, 80),
+        ('ABS', 250, 100),
+        ('Cooldown', 0, 0)
+    ]
+    cursor.executemany('''
+        INSERT INTO temp_presets (user_discord_id, name, hotend_temp, bed_temp)
+        VALUES (?, ?, ?, ?)
+    ''', [(user_id, name, hot, bed) for name, hot, bed in defaults])
+
+
 def update_user(
     discord_id: int,
     timezone: Optional[str] = None,
     language: Optional[str] = None,
     notify_channel: Optional[str] = None,
+    active_printer_id: Optional[int] = None,
 ) -> bool:
     """Update user information."""
     with get_connection() as conn:
@@ -137,6 +191,9 @@ def update_user(
         if notify_channel is not None:
             updates.append("notify_channel = ?")
             values.append(notify_channel)
+        if active_printer_id is not None:
+            updates.append("active_printer_id = ?")
+            values.append(active_printer_id)
         
         if not updates:
             return False
@@ -156,6 +213,82 @@ def ensure_user_exists(discord_id: int) -> bool:
     return create_user(discord_id)
 
 
+# ── Active Printer Management ────────────────────────────────────────────────
+
+def get_active_printer_id(user_id: int) -> Optional[int]:
+    """Get the active printer ID for a user."""
+    user = get_user(user_id)
+    if not user:
+        return None
+
+    active_id = user.get('active_printer_id')
+
+    # If no active printer set, but user has accessible ones, pick the first one
+    if active_id is None:
+        printers = get_accessible_printers(user_id)
+        if printers:
+            active_id = printers[0]['printer_id']
+            update_user(user_id, active_printer_id=active_id)
+
+    return active_id
+
+
+def get_active_printer(user_id: int) -> Optional[Dict[str, Any]]:
+    """Get the active printer configuration for a user."""
+    printer_id = get_active_printer_id(user_id)
+    if printer_id is None:
+        return None
+    return get_printer(printer_id)
+
+
+def set_active_printer(user_id: int, printer_id: int) -> bool:
+    """Set the active printer for a user."""
+    # Verify user has access to this printer
+    if not user_can_view(user_id, printer_id):
+        return False
+
+    return update_user(user_id, active_printer_id=printer_id)
+
+
+# ── Temperature Presets ──────────────────────────────────────────────────────
+
+def get_temp_presets(user_id: int) -> List[Dict[str, Any]]:
+    """Get all temperature presets for a user."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM temp_presets
+            WHERE user_discord_id = ?
+            ORDER BY name
+        ''', (user_id,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+def add_temp_preset(user_id: int, name: str, hotend: int, bed: int) -> int:
+    """Add a new temperature preset."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO temp_presets (user_discord_id, name, hotend_temp, bed_temp)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, name, hotend, bed))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def delete_temp_preset(preset_id: int, user_id: int) -> bool:
+    """Delete a temperature preset."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM temp_presets WHERE preset_id = ? AND user_discord_id = ?",
+            (preset_id, user_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 # ── Printer Operations ────────────────────────────────────────────────────────
 
 def create_printer(
@@ -165,6 +298,8 @@ def create_printer(
     url: str,
     api_key: Optional[str] = None,
     privacy: str = 'public',
+    camera_url: Optional[str] = None,
+    stream_url: Optional[str] = None,
 ) -> int:
     """
     Create a new printer.
@@ -176,11 +311,21 @@ def create_printer(
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO printers (owner_discord_id, name, type, url, api_key, privacy)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (owner_discord_id, name, printer_type, url, api_key, privacy))
+            INSERT INTO printers (owner_discord_id, name, type, url, api_key, privacy, camera_url, stream_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (owner_discord_id, name, printer_type, url, api_key, privacy, camera_url, stream_url))
         conn.commit()
         printer_id = cursor.lastrowid
+
+        # If this is the user's first printer, make it active
+        user = get_user(owner_discord_id)
+        if user and user.get('active_printer_id') is None:
+            cursor.execute(
+                "UPDATE users SET active_printer_id = ? WHERE discord_id = ?",
+                (printer_id, owner_discord_id)
+            )
+            conn.commit()
+
         logger.info(f"Created printer {printer_id}: {name}")
         return printer_id
 
@@ -210,6 +355,8 @@ def update_printer(
     url: Optional[str] = None,
     api_key: Optional[str] = None,
     privacy: Optional[str] = None,
+    camera_url: Optional[str] = None,
+    stream_url: Optional[str] = None,
 ) -> bool:
     """Update printer information."""
     if privacy is not None and privacy not in ('public', 'private'):
@@ -236,6 +383,12 @@ def update_printer(
         if privacy is not None:
             updates.append("privacy = ?")
             values.append(privacy)
+        if camera_url is not None:
+            updates.append("camera_url = ?")
+            values.append(camera_url)
+        if stream_url is not None:
+            updates.append("stream_url = ?")
+            values.append(stream_url)
         
         if not updates:
             return False
@@ -257,6 +410,12 @@ def delete_printer(printer_id: int) -> bool:
     with get_connection() as conn:
         cursor = conn.cursor()
         
+        # Unset as active printer for any users
+        cursor.execute(
+            "UPDATE users SET active_printer_id = NULL WHERE active_printer_id = ?",
+            (printer_id,)
+        )
+
         # Delete allowed users first (foreign key constraint)
         cursor.execute(
             "DELETE FROM printer_allowed_users WHERE printer_id = ?",
@@ -463,12 +622,25 @@ def delete_user(discord_id: int) -> bool:
     with get_connection() as conn:
         cursor = conn.cursor()
         
+        # Delete user's printers
+        cursor.execute(
+            "DELETE FROM printer_allowed_users WHERE printer_id IN (SELECT printer_id FROM printers WHERE owner_discord_id = ?)",
+            (discord_id,)
+        )
+        cursor.execute("DELETE FROM printers WHERE owner_discord_id = ?", (discord_id,))
+
         # Delete from allowed_users
         cursor.execute(
             "DELETE FROM printer_allowed_users WHERE user_discord_id = ?",
             (discord_id,)
         )
         
+        # Delete from temp_presets
+        cursor.execute(
+            "DELETE FROM temp_presets WHERE user_discord_id = ?",
+            (discord_id,)
+        )
+
         # Delete user
         cursor.execute("DELETE FROM users WHERE discord_id = ?", (discord_id,))
         conn.commit()

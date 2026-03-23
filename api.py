@@ -1,6 +1,6 @@
 """
 Printer API client for Discord Printer Bot.
-Supports Moonraker (Klipper), OctoPrint, and OctoEverywhere for remote access.
+Supports OctoEverywhere as the primary remote connection method.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import urllib.parse
 import aiohttp
 from typing import Optional, Dict, List, Any
 
-import config
+import db
 
 logger = logging.getLogger("PrinterBot.api")
 
@@ -18,48 +18,45 @@ _TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 def _get_printer_type(user_id: int) -> str:
     """Determine which API to use for the user's active printer."""
-    p = config.active_printer_for(user_id)
-    if p.get("octoeverywhere", {}).get("key"):
-        return "octoeverywhere"
-    elif p.get("octoprint", {}).get("url"):
-        return "octoprint"
-    else:
-        return "moonraker"
+    p = db.get_active_printer(user_id)
+    if not p:
+        return "moonraker" # Fallback
+    return p.get("type", "moonraker")
 
 
 def _get_base_url(user_id: int) -> str:
     """Get the base URL for the user's active printer."""
-    printer_type = _get_printer_type(user_id)
-    p = config.active_printer_for(user_id)
+    p = db.get_active_printer(user_id)
+    if not p:
+        return ""
+
+    printer_type = p.get("type")
+    url = p.get("url", "").rstrip("/")
     
     if printer_type == "octoeverywhere":
         # OctoEverywhere uses a cloud proxy
-        key = p.get("octoeverywhere", {}).get("key", "")
-        return f"https://api.octoeverywhere.com/api/{key}"
-    elif printer_type == "octoprint":
-        return p.get("octoprint", {}).get("url", "").rstrip("/")
-    else:
-        return p.get("moonraker", {}).get("url", "").rstrip("/")
+        # The URL in DB should be the api key or the full api url
+        if url.startswith("http"):
+            return url
+        return f"https://api.octoeverywhere.com/api/{url}"
+    return url
 
 
 def _get_headers(user_id: int) -> dict:
     """Get headers for API requests."""
-    printer_type = _get_printer_type(user_id)
-    p = config.active_printer_for(user_id)
+    p = db.get_active_printer(user_id)
+    if not p:
+        return {}
+
+    printer_type = p.get("type")
+    api_key = p.get("api_key")
     
     headers = {"Content-Type": "application/json"}
     
-    if printer_type == "octoeverywhere":
-        # OctoEverywhere uses the key in the URL
-        pass
-    elif printer_type == "octoprint":
-        api_key = p.get("octoprint", {}).get("api_key", "")
-        if api_key:
-            headers["X-Api-Key"] = api_key
-    else:
-        api_key = p.get("moonraker", {}).get("api_key", "")
-        if api_key:
-            headers["X-Api-Key"] = api_key
+    if printer_type == "octoprint" and api_key:
+        headers["X-Api-Key"] = api_key
+    elif printer_type == "moonraker" and api_key:
+        headers["X-Api-Key"] = api_key
     
     return headers
 
@@ -67,6 +64,8 @@ def _get_headers(user_id: int) -> dict:
 async def _get(endpoint: str, user_id: int) -> Optional[dict]:
     """GET request to printer API."""
     base = _get_base_url(user_id)
+    if not base:
+        return None
     url = f"{base}{endpoint}"
     
     try:
@@ -85,6 +84,8 @@ async def _get(endpoint: str, user_id: int) -> Optional[dict]:
 async def _post(endpoint: str, data: dict = None, user_id: int = None) -> Optional[dict]:
     """POST request to printer API."""
     base = _get_base_url(user_id)
+    if not base:
+        return None
     url = f"{base}{endpoint}"
     
     try:
@@ -104,6 +105,8 @@ async def _post(endpoint: str, data: dict = None, user_id: int = None) -> Option
 async def _delete(endpoint: str, user_id: int) -> Optional[dict]:
     """DELETE request to printer API."""
     base = _get_base_url(user_id)
+    if not base:
+        return None
     url = f"{base}{endpoint}"
     
     try:
@@ -120,7 +123,7 @@ async def _delete(endpoint: str, user_id: int) -> Optional[dict]:
 
 
 async def _post_command(command: str, user_id: int) -> bool:
-    """Send a command to the printer (works for both Moonraker and OctoPrint)."""
+    """Send a command to the printer."""
     printer_type = _get_printer_type(user_id)
     
     if printer_type == "octoprint":
@@ -131,7 +134,7 @@ async def _post_command(command: str, user_id: int) -> bool:
     else:
         # Moonraker/OctoEverywhere
         encoded = urllib.parse.quote(command)
-        result = await _post(f"/printer/gcode/script?script={encoded}", user_id)
+        result = await _post(f"/printer/gcode/script?script={encoded}", None, user_id)
         return result is not None
 
 
@@ -152,10 +155,10 @@ async def printer_status(user_id: int) -> Optional[dict]:
         
         result = {
             "state": data.get("state", "unknown"),
-            "progress": data.get("progress", 0),
+            "progress": data.get("progress", {}).get("completion", 0) / 100 if data.get("progress") else 0,
             "file": data.get("job", {}).get("file", {}).get("name", ""),
             "estimated_time": data.get("job", {}).get("estimatedPrintTime", 0),
-            "elapsed_time": data.get("progress", {}).get("printTime", 0),
+            "elapsed_time": data.get("progress", {}).get("printTime", 0) if data.get("progress") else 0,
         }
         
         if temps:
@@ -216,7 +219,7 @@ async def start_print(filename: str, user_id: int) -> bool:
         return result is not None
     else:
         encoded = urllib.parse.quote(filename, safe="")
-        result = await _post(f"/printer/print/start?filename={encoded}", user_id)
+        result = await _post(f"/printer/print/start?filename={encoded}", None, user_id)
         return result is not None
 
 
@@ -225,11 +228,11 @@ async def pause_print(user_id: int) -> bool:
     printer_type = _get_printer_type(user_id)
     
     if printer_type == "octoprint":
-        data = {"command": "pause"}
+        data = {"command": "pause", "action": "pause"}
         result = await _post("/api/job", data, user_id)
         return result is not None
     else:
-        result = await _post("/printer/print/pause", user_id)
+        result = await _post("/printer/print/pause", None, user_id)
         return result is not None
 
 
@@ -238,11 +241,11 @@ async def resume_print(user_id: int) -> bool:
     printer_type = _get_printer_type(user_id)
     
     if printer_type == "octoprint":
-        data = {"command": "resume"}
+        data = {"command": "pause", "action": "resume"}
         result = await _post("/api/job", data, user_id)
         return result is not None
     else:
-        result = await _post("/printer/print/resume", user_id)
+        result = await _post("/printer/print/resume", None, user_id)
         return result is not None
 
 
@@ -255,7 +258,7 @@ async def cancel_print(user_id: int) -> bool:
         result = await _post("/api/job", data, user_id)
         return result is not None
     else:
-        result = await _post("/printer/print/cancel", user_id)
+        result = await _post("/printer/print/cancel", None, user_id)
         return result is not None
 
 
@@ -265,10 +268,9 @@ async def emergency_stop(user_id: int) -> bool:
     
     if printer_type == "octoprint":
         # OctoPrint doesn't have a direct emergency stop
-        # We'll send M112 which is the emergency stop G-code
         return await _post_command("M112", user_id)
     else:
-        result = await _post("/printer/emergency_stop", user_id)
+        result = await _post("/printer/emergency_stop", None, user_id)
         return result is not None
 
 
@@ -301,8 +303,6 @@ async def print_history(limit: int = 20, user_id: int = None) -> List[dict]:
     printer_type = _get_printer_type(user_id)
     
     if printer_type == "octoprint":
-        # OctoPrint doesn't have a built-in history API
-        # Would need a plugin like PrintHistory
         return []
     else:
         data = await _get(f"/server/history/list?limit={limit}&order=desc", user_id)
@@ -411,9 +411,11 @@ async def wait_for_bed(temp: float, user_id: int) -> bool:
 
 async def snapshot(user_id: int) -> Optional[bytes]:
     """Fetch camera snapshot image bytes."""
-    p = config.active_printer_for(user_id)
-    cam = p.get("camera", {})
-    url = cam.get("snapshot_url", "")
+    p = db.get_active_printer(user_id)
+    if not p:
+        return None
+
+    url = p.get("camera_url")
     
     if not url:
         return None
@@ -430,6 +432,7 @@ async def snapshot(user_id: int) -> Optional[bytes]:
 
 async def get_stream_url(user_id: int) -> Optional[str]:
     """Get the camera stream URL."""
-    p = config.active_printer_for(user_id)
-    cam = p.get("camera", {})
-    return cam.get("stream_url", "")
+    p = db.get_active_printer(user_id)
+    if not p:
+        return None
+    return p.get("stream_url")

@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
+import db
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -64,11 +65,15 @@ class PrinterBot(commands.Bot):
             elif custom_id.startswith('user_settings_edit:'):
                 user_id = int(custom_id.split(':')[1])
                 await self.handle_user_settings_edit(interaction, user_id)
+
+            # Handle printer activation button
+            elif custom_id.startswith('printer_activate:'):
+                printer_id = int(custom_id.split(':')[1])
+                await self.handle_printer_activate(interaction, printer_id)
     
     async def handle_printer_edit(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer edit button click."""
         from handlers.printer_config import PrinterSettingsModal
-        import db
         
         user_id = interaction.user.id
         
@@ -92,8 +97,6 @@ class PrinterBot(commands.Bot):
     
     async def handle_printer_delete(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer delete button click."""
-        import db
-        
         user_id = interaction.user.id
         
         # Check ownership
@@ -158,7 +161,6 @@ class PrinterBot(commands.Bot):
     
     async def handle_printer_users(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer manage users button click."""
-        import db
         from handlers.printer_config import AllowedUsersView
         
         user_id = interaction.user.id
@@ -214,7 +216,6 @@ class PrinterBot(commands.Bot):
     async def handle_user_settings_edit(self, interaction: discord.Interaction, user_id: int):
         """Handle user settings edit button click."""
         from handlers.printer_config import UserSettingsModal
-        import discord
         
         if interaction.user.id != user_id:
             await interaction.response.send_message(
@@ -225,6 +226,22 @@ class PrinterBot(commands.Bot):
         
         user = interaction.user
         await interaction.response.send_modal(UserSettingsModal(user))
+
+    async def handle_printer_activate(self, interaction: discord.Interaction, printer_id: int):
+        """Handle printer activation button click."""
+        user_id = interaction.user.id
+
+        if db.set_active_printer(user_id, printer_id):
+            printer = db.get_printer(printer_id)
+            await interaction.response.send_message(
+                f"✅ **{printer['name']}** is now your active printer.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ Failed to set active printer. Do you have access?",
+                ephemeral=True,
+            )
     
     async def setup_hook(self):
         """Load cogs on startup."""
@@ -240,7 +257,7 @@ class PrinterBot(commands.Bot):
             "handlers.history",
             "handlers.bed_mesh",
             "handlers.printers",
-            "handlers.printer_config",  # New centralized printer config
+            "handlers.printer_config",
         ]
         
         for cog in cogs:
@@ -271,23 +288,17 @@ class PrinterBot(commands.Bot):
 
 async def main():
     """Main entry point."""
+    # Initialize DB
+    db.init_db()
+
     # Load configuration
-    try:
-        cfg = config.load()
-        logger.info("Configuration loaded successfully")
-    except FileNotFoundError as e:
-        logger.error(e)
-        logger.error("Please copy config.yaml.example to config.yaml and configure it")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
-        sys.exit(1)
+    config.load()
     
     # Get Discord token
     token = config.discord_token()
     if not token or token == "YOUR_DISCORD_BOT_TOKEN_HERE":
-        logger.error("Discord bot token not configured in config.yaml")
-        logger.error("Please get a token from https://discord.com/developers/applications")
+        logger.error("Discord bot token not configured")
+        logger.error("Please set DISCORD_TOKEN env var or configure in config.yaml")
         sys.exit(1)
     
     # Create and run bot

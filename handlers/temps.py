@@ -6,8 +6,9 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import Modal, TextInput, Button, View
 
-import config
+import db
 import api
 import permissions
 
@@ -22,9 +23,10 @@ class TempsCog(commands.Cog):
     async def temperatures(self, interaction: discord.Interaction):
         """Show temperature control menu."""
         user_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
+            permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -67,94 +69,32 @@ class TempsCog(commands.Cog):
         view = TempsView(user_id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
-    @app_commands.command(
-        name="set-hotend",
-        description="Set hotend target temperature"
-    )
-    @app_commands.describe(temperature="Target temperature in °C (0 to cool)")
-    async def set_hotend(self, interaction: discord.Interaction, temperature: float):
-        """Set hotend target temperature."""
+    @app_commands.command(name="presets-manager", description="Manage your temperature presets")
+    async def presets_manager(self, interaction: discord.Interaction):
+        """View and manage temperature presets."""
         user_id = interaction.user.id
+        db.ensure_user_exists(user_id)
         
-        try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
-        except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
+        presets = db.get_temp_presets(user_id)
         
-        if temperature < 0 or temperature > 300:
-            await interaction.response.send_message(
-                "❌ Temperature must be between 0 and 300°C",
-                ephemeral=True,
-            )
-            return
+        embed = discord.Embed(
+            title="📑 Your Temperature Presets",
+            description="Manage your custom material presets.",
+            color=discord.Color.blue(),
+        )
         
-        await interaction.response.defer()
-        
-        result = await api.set_hotend_temp(temperature, user_id)
-        
-        if result:
-            await interaction.followup.send(
-                f"✅ Hotend set to {temperature:.0f}°C",
-                ephemeral=True,
-            )
+        if presets:
+            for p in presets:
+                embed.add_field(
+                    name=p['name'],
+                    value=f"Hotend: {p['hotend_temp']}°C / Bed: {p['bed_temp']}°C",
+                    inline=True,
+                )
         else:
-            await interaction.followup.send("❌ Failed to set temperature", ephemeral=True)
-    
-    @app_commands.command(
-        name="set-bed",
-        description="Set bed target temperature"
-    )
-    @app_commands.describe(temperature="Target temperature in °C (0 to cool)")
-    async def set_bed(self, interaction: discord.Interaction, temperature: float):
-        """Set bed target temperature."""
-        user_id = interaction.user.id
-        
-        try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
-        except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        
-        if temperature < 0 or temperature > 120:
-            await interaction.response.send_message(
-                "❌ Temperature must be between 0 and 120°C",
-                ephemeral=True,
-            )
-            return
-        
-        await interaction.response.defer()
-        
-        result = await api.set_bed_temp(temperature, user_id)
-        
-        if result:
-            await interaction.followup.send(
-                f"✅ Bed set to {temperature:.0f}°C",
-                ephemeral=True,
-            )
-        else:
-            await interaction.followup.send("❌ Failed to set temperature", ephemeral=True)
-    
-    @app_commands.command(name="cool-all", description="Turn off all heaters")
-    async def cool_all(self, interaction: discord.Interaction):
-        """Turn off all heaters."""
-        user_id = interaction.user.id
-        
-        try:
-            permissions.check_control_permission(user_id, config.active_printer_id(user_id))
-        except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        
-        await interaction.response.defer()
-        
-        hotend_result = await api.set_hotend_temp(0, user_id)
-        bed_result = await api.set_bed_temp(0, user_id)
-        
-        if hotend_result and bed_result:
-            await interaction.followup.send("✅ All heaters turned off", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ Failed to turn off heaters", ephemeral=True)
+            embed.description = "You don't have any presets yet."
+
+        view = PresetsManagerView(user_id, presets)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class TempsView(discord.ui.View):
@@ -163,36 +103,17 @@ class TempsView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=None)
         self.user_id = user_id
-        
-        # Get presets from config
-        presets = config.temp_presets()
-        self.hotend_presets = presets.get("hotend", {
-            "PLA": 200,
-            "PETG": 230,
-            "ABS": 245,
-            "Cool": 0,
-        })
-        self.bed_presets = presets.get("bed", {
-            "PLA": 60,
-            "PETG": 80,
-            "ABS": 100,
-            "Cool": 0,
-        })
     
-    @discord.ui.button(label="🔥 Hotend Presets", style=discord.ButtonStyle.primary)
-    async def hotend_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = PresetSelectView(self.user_id, "hotend", self.hotend_presets)
+    @discord.ui.button(label="📑 Presets", style=discord.ButtonStyle.primary)
+    async def presets_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        presets = db.get_temp_presets(self.user_id)
+        if not presets:
+            await interaction.response.send_message("You have no presets configured.", ephemeral=True)
+            return
+
+        view = PresetSelectView(self.user_id, presets)
         await interaction.response.send_message(
-            "Select hotend preset:",
-            view=view,
-            ephemeral=True,
-        )
-    
-    @discord.ui.button(label="🛏️ Bed Presets", style=discord.ButtonStyle.primary)
-    async def bed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = PresetSelectView(self.user_id, "bed", self.bed_presets)
-        await interaction.response.send_message(
-            "Select bed preset:",
+            "Select a preset to apply:",
             view=view,
             ephemeral=True,
         )
@@ -211,40 +132,76 @@ class TempsView(discord.ui.View):
 class PresetSelectView(discord.ui.View):
     """View for selecting temperature presets."""
     
-    def __init__(self, user_id: int, heater_type: str, presets: dict):
+    def __init__(self, user_id: int, presets: list):
         super().__init__(timeout=None)
         self.user_id = user_id
-        self.heater_type = heater_type
-        self.presets = presets
         
-        # Add buttons for each preset
-        for i, (name, temp) in enumerate(presets.items()):
+        for p in presets:
+            name = p['name']
+            hot = p['hotend_temp']
+            bed = p['bed_temp']
+
             button = discord.ui.Button(
-                label=f"{name}: {temp}°C",
+                label=f"{name} ({hot}/{bed})",
                 style=discord.ButtonStyle.secondary,
-                custom_id=f"preset_{heater_type}_{name}",
             )
-            button.callback = self.make_callback(name, temp)
+            button.callback = self.make_callback(name, hot, bed)
             self.add_item(button)
     
-    def make_callback(self, name: str, temp: float):
-        """Create a callback for a preset button."""
+    def make_callback(self, name: str, hot: int, bed: int):
         async def callback(interaction: discord.Interaction):
             await interaction.response.defer()
+            h_res = await api.set_hotend_temp(hot, self.user_id)
+            b_res = await api.set_bed_temp(bed, self.user_id)
             
-            if self.heater_type == "hotend":
-                result = await api.set_hotend_temp(temp, self.user_id)
-                msg = f"Hotend set to {temp}°C ({name})"
+            if h_res and b_res:
+                await interaction.followup.send(f"✅ Applied preset **{name}** ({hot}°C / {bed}°C)", ephemeral=True)
             else:
-                result = await api.set_bed_temp(temp, self.user_id)
-                msg = f"Bed set to {temp}°C ({name})"
-            
-            await interaction.followup.send(
-                f"✅ {msg}" if result else f"❌ Failed to set {self.heater_type}",
-                ephemeral=True,
-            )
-        
+                await interaction.followup.send(f"❌ Failed to apply preset **{name}**", ephemeral=True)
         return callback
+
+
+class AddPresetModal(Modal, title="Add Temperature Preset"):
+    name_input = TextInput(label="Preset Name", placeholder="e.g. PLA, PETG", required=True)
+    hotend_input = TextInput(label="Hotend Temp (°C)", placeholder="200", required=True)
+    bed_input = TextInput(label="Bed Temp (°C)", placeholder="60", required=True)
+
+    def __init__(self, user_id: int):
+        super().__init__()
+        self.user_id = user_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            hot = int(self.hotend_input.value)
+            bed = int(self.bed_input.value)
+            db.add_temp_preset(self.user_id, self.name_input.value, hot, bed)
+            await interaction.response.send_message(f"✅ Added preset **{self.name_input.value}**", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Temperature must be a number.", ephemeral=True)
+
+
+class PresetsManagerView(discord.ui.View):
+    def __init__(self, user_id: int, presets: list):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+
+        if presets:
+            select = discord.ui.Select(placeholder="Select a preset to delete...")
+            for p in presets:
+                select.add_option(label=p['name'], value=str(p['preset_id']), description=f"{p['hotend_temp']}°C / {p['bed_temp']}°C")
+            select.callback = self.delete_callback
+            self.add_item(select)
+            
+    @discord.ui.button(label="➕ Add Preset", style=discord.ButtonStyle.success)
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddPresetModal(self.user_id))
+        
+    async def delete_callback(self, interaction: discord.Interaction):
+        preset_id = int(interaction.data['values'][0])
+        if db.delete_temp_preset(preset_id, self.user_id):
+            await interaction.response.send_message("✅ Preset deleted.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to delete preset.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
