@@ -116,8 +116,8 @@ apt install -y python3 python3-pip python3-venv git
 
 ### 2. Setup the Bot
 ```bash
-git clone https://github.com/your-repo/discord-printer-bot.git
-cd discord-printer-bot
+git clone https://github.com/your-repo/discord-printer-bot.git /opt/printer-bot
+cd /opt/printer-bot
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -132,8 +132,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/discord-printer-bot
-ExecStart=/root/discord-printer-bot/venv/bin/python bot.py
+WorkingDirectory=/opt/printer-bot
+ExecStart=/opt/printer-bot/venv/bin/python bot.py
 Restart=always
 Environment="DISCORD_TOKEN=your_token_here"
 
