@@ -3,10 +3,8 @@ Permission system with database integration.
 Handles user permissions, printer ownership, and access control.
 """
 
-import logging
-from typing import List, Dict, Any
-
-import database
+from datetime import datetime
+import db
 
 logger = logging.getLogger("PrinterBot")
 
@@ -17,7 +15,7 @@ class PermissionError(Exception):
 
 def check_view_permission(user_id: int, printer_id: int) -> bool:
     """Check if a user can view a printer."""
-    printer = database.db.get_printer_by_id(printer_id)
+    printer = db.get_printer(printer_id)
     if not printer:
         return False
     
@@ -30,12 +28,12 @@ def check_view_permission(user_id: int, printer_id: int) -> bool:
         return True
     
     # Check allowed users
-    allowed_users = database.db.get_allowed_users(printer_id)
+    allowed_users = db.get_allowed_users(printer_id)
     return user_id in allowed_users
 
 def check_owner_permission(user_id: int, printer_id: int) -> None:
     """Check if a user is the owner of a printer."""
-    printer = database.db.get_printer_by_id(printer_id)
+    printer = db.get_printer(printer_id)
     if not printer:
         raise PermissionError(f"Printer ID {printer_id} not found")
     
@@ -44,7 +42,7 @@ def check_owner_permission(user_id: int, printer_id: int) -> None:
 
 def get_accessible_printers_embed(user_id: int) -> Dict[str, Any]:
     """Get embed data for accessible printers."""
-    printers = database.db.get_printers_accessible_by_user(user_id)
+    printers = db.get_accessible_printers(user_id)
     
     if not printers:
         return {
@@ -66,7 +64,7 @@ def get_accessible_printers_embed(user_id: int) -> Dict[str, Any]:
 
 def get_printer_info_embed(printer_id: int, user_id: int) -> Dict[str, Any]:
     """Get embed data for printer information."""
-    printer = database.db.get_printer_by_id(printer_id)
+    printer = db.get_printer(printer_id)
     
     if not printer:
         return {
@@ -76,7 +74,7 @@ def get_printer_info_embed(printer_id: int, user_id: int) -> Dict[str, Any]:
         }
     
     # Check if user has access
-    accessible_printers = database.db.get_printers_accessible_by_user(user_id)
+    accessible_printers = db.get_accessible_printers(user_id)
     has_access = any(p["printer_id"] == printer_id for p in accessible_printers)
     
     if not has_access:
@@ -87,7 +85,7 @@ def get_printer_info_embed(printer_id: int, user_id: int) -> Dict[str, Any]:
         }
     
     privacy_status = "Public" if printer.get("privacy") == "public" else "Private"
-    allowed_users = database.db.get_allowed_users(printer_id)
+    allowed_users = db.get_allowed_users(printer_id)
     
     fields = [
         {"name": "Type", "value": printer.get("type", "Unknown").title(), "inline": True},
@@ -107,21 +105,21 @@ def get_printer_info_embed(printer_id: int, user_id: int) -> Dict[str, Any]:
 def set_printer_privacy(printer_id: int, private: bool) -> bool:
     """Set printer privacy setting."""
     privacy = "private" if private else "public"
-    return database.db.set_printer_privacy(printer_id, privacy)
+    return db.update_printer(printer_id, privacy=privacy)
 
 def add_allowed_user(printer_id: int, user_id: int) -> bool:
     """Add a user to the allowed users list."""
-    return database.db.add_allowed_user(printer_id, user_id)
+    return db.add_allowed_user(printer_id, user_id)
 
 def remove_allowed_user(printer_id: int, user_id: int) -> bool:
     """Remove a user from the allowed users list."""
-    return database.db.remove_allowed_user(printer_id, user_id)
+    return db.remove_allowed_user(printer_id, user_id)
 
 def update_printer_settings(printer_id: int, **kwargs) -> bool:
     """Update printer settings."""
-    return database.db.update_printer(printer_id, **kwargs)
+    return db.update_printer(printer_id, **kwargs)
 
 def check_printer_exists(name: str) -> bool:
     """Check if a printer with the given name exists."""
-    printer = database.db.get_printer_by_name(name)
+    printer = db.get_printer_by_name(name)
     return printer is not None

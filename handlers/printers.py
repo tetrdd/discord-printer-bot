@@ -1,6 +1,10 @@
 """
 Printer management commands for Discord Printer Bot.
 Switch printers, manage permissions, configure settings.
+
+Note: For v2.0+, use /register-printer, /printer-settings, /my-settings
+for database-driven printer management. These commands are kept for
+backwards compatibility with config.yaml-based setups.
 """
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ from typing import Optional
 
 import config
 import permissions
+import db
 
 
 class PrintersCog(commands.Cog):
@@ -24,6 +29,37 @@ class PrintersCog(commands.Cog):
         """List all printers you have access to."""
         user_id = interaction.user.id
         
+        # Try database first (v2.0+)
+        try:
+            printers = db.get_accessible_printers(user_id)
+            if printers:
+                embed = discord.Embed(
+                    title="🖨️ Your Printers",
+                    description=f"You have access to **{len(printers)}** printer(s).",
+                    color=discord.Color.green(),
+                )
+                
+                for printer in printers:
+                    pid = printer['printer_id']
+                    name = printer['name']
+                    ptype = printer['type']
+                    privacy = printer['privacy']
+                    
+                    owner_emoji = "👑" if db.is_printer_owner(user_id, pid) else ""
+                    privacy_emoji = "🔒" if privacy == 'private' else "🌍"
+                    
+                    embed.add_field(
+                        name=f"{owner_emoji} {name}",
+                        value=f"ID: `{pid}` • {ptype} • {privacy_emoji}",
+                        inline=False,
+                    )
+                
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+        except Exception:
+            pass
+        
+        # Fallback to config.yaml (legacy)
         embed_data = permissions.get_accessible_printers_embed(user_id)
         
         embed = discord.Embed(

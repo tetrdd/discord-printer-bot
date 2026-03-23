@@ -1,11 +1,16 @@
 """
 Configuration loader and saver for Discord Printer Bot.
 Reads config.yaml on startup, provides live save for settings changes.
-Supports multi-printer configs with OctoEverywhere integration.
+
+⚠️  DEPRECATED (v2.0): Printer configurations are now stored in SQLite database.
+This module is kept for backwards compatibility and non-printer settings only.
+
+For printer management, use the `db` module instead.
 """
 from __future__ import annotations
 
 import yaml
+import warnings
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 
@@ -46,7 +51,15 @@ def _build_printer_list() -> list[dict]:
     """
     Build a normalized list of printers from config.
     Supports both single-printer and multi-printer configs.
+    
+    ⚠️  DEPRECATED: Use db.get_printers_by_owner() or db.get_accessible_printers() instead.
     """
+    warnings.warn(
+        "config._build_printer_list() is deprecated. Use db module for printer management.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    
     if "printers" in _cfg:
         printers = []
         for i, p in enumerate(_cfg["printers"]):

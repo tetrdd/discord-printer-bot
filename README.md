@@ -4,6 +4,130 @@ A full-featured Discord bot for controlling 3D printers via **Moonraker/Klipper*
 
 Based on the [telegram-printer-bot](https://github.com/tetrdd/telegram-printer-bot) but rebuilt for Discord with enhanced features.
 
+## 🏗️ Architecture
+
+### Centralized Printer Configuration (SQLite)
+
+As of v2.0, printer configurations are stored in a **SQLite database** instead of `config.yaml`. This provides:
+
+- **Per-user printer management** - Each user can register and manage their own printers
+- **Dynamic configuration** - Add/remove printers without restarting the bot
+- **Fine-grained permissions** - Public/private printers with allowed users
+- **User preferences** - Timezone, language, notification channels
+
+The database is stored at `data/printers.db` and is created automatically on first run.
+
+---
+
+## 📋 Database Schema
+
+### Tables
+
+#### `users`
+Stores user preferences and settings.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `discord_id` | INTEGER | Primary key, Discord user ID |
+| `timezone` | TEXT | User's timezone (e.g., "Europe/Berlin") |
+| `language` | TEXT | Language preference (e.g., "en", "de") |
+| `notify_channel` | TEXT | Discord channel ID for notifications |
+
+#### `printers`
+Stores printer configurations.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `printer_id` | INTEGER | Primary key, auto-increment |
+| `owner_discord_id` | INTEGER | Owner's Discord ID |
+| `name` | TEXT | Printer display name |
+| `type` | TEXT | Connection type: "moonraker", "octoprint", or "octoeverywhere" |
+| `url` | TEXT | Printer URL (Moonraker/OctoPrint) or empty for OctoEverywhere |
+| `api_key` | TEXT | API key (optional) |
+| `privacy` | TEXT | "public" or "private" |
+| `creation_timestamp` | DATETIME | When the printer was registered |
+
+#### `printer_allowed_users`
+Many-to-many relationship for printer access control.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `printer_id` | INTEGER | Reference to printers table |
+| `user_discord_id` | INTEGER | Discord user ID with access |
+
+---
+
+## 🔄 Migration Guide (v1.x → v2.0)
+
+If you're upgrading from v1.x (config.yaml-based), follow these steps to migrate your printer configurations to the new SQLite database.
+
+### Step 1: Backup Your Config
+
+```bash
+cp config.yaml config.yaml.backup
+```
+
+### Step 2: Run Migration Script
+
+A migration script is provided to import your existing printers:
+
+```bash
+python migrate_from_yaml.py
+```
+
+This script will:
+1. Read your existing `config.yaml`
+2. Create user entries for all printer owners
+3. Import all printers into the database
+4. Preserve privacy settings and allowed users
+
+### Step 3: Verify Migration
+
+Use the bot commands to verify your printers were imported:
+
+```
+/list-printers
+/printer-settings <id>
+```
+
+### Step 4: Update Your Config
+
+After migration, remove the `printers:` section from `config.yaml`. Keep only:
+- Discord token
+- Temperature presets
+- Macro configuration
+- File browser settings
+- Monitoring settings
+
+Example minimal `config.yaml` after migration:
+
+```yaml
+discord:
+  bot_token: "YOUR_DISCORD_BOT_TOKEN_HERE"
+
+temp_presets:
+  hotend:
+    PLA: 200
+    PETG: 230
+  bed:
+    PLA: 60
+    PETG: 80
+
+macros:
+  aliases:
+    LOAD_FILAMENT: "🔄 Load Filament"
+```
+
+### Manual Migration (if needed)
+
+If the migration script fails, you can manually register printers using Discord commands:
+
+1. Start the bot with the new version
+2. Use `/register-printer` to add each printer
+3. Use `/add-user` to grant access to other users
+
+---
+
 ## ✨ Features
 
 ### 🎮 Printer Control
@@ -32,6 +156,14 @@ Based on the [telegram-printer-bot](https://github.com/tetrdd/telegram-printer-b
 
 ## 📋 Commands
 
+### 🆕 Printer Configuration (v2.0)
+- `/register-printer` - Register a new printer (opens interactive modal)
+- `/my-settings` - View or update your personal settings (timezone, language, notifications)
+- `/printer-settings <id>` - View or update printer settings (owner only)
+- `/list-printers` - List all printers you can access
+- `/add-user <printer> <user>` - Add a user to your printer's allowed list
+- `/remove-user <printer> <user>` - Remove a user from your printer's allowed list
+
 ### Core Commands
 - `/status` - Get current printer status
 - `/menu` - Show main menu
@@ -52,14 +184,10 @@ Based on the [telegram-printer-bot](https://github.com/tetrdd/telegram-printer-b
 - `/history` - View print history
 - `/bed-mesh` - View bed mesh profile
 
-### Printer Management
+### Printer Management (Legacy)
 - `/printers` - List accessible printers
 - `/switch-printer <id>` - Switch to a different printer
 - `/printer-info <id>` - Get printer details
-- `/set-privacy <id> <private>` - Set printer privacy (owner only)
-- `/add-user <printer> <user>` - Add user to allowed list (owner only)
-- `/remove-user <printer> <user>` - Remove user from allowed list (owner only)
-- `/rename-printer <id> <name>` - Rename printer (owner only)
 
 ## 🚀 Quick Start
 
