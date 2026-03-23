@@ -208,7 +208,15 @@ def update_user(
 
 def ensure_user_exists(discord_id: int) -> bool:
     """Ensure a user exists in the database, create if not."""
-    if get_user(discord_id):
+    user = get_user(discord_id)
+    if user:
+        # Check if they have presets, if not add defaults (migration for existing users)
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM temp_presets WHERE user_discord_id = ? LIMIT 1", (discord_id,))
+            if not cursor.fetchone():
+                _add_default_presets(discord_id, cursor)
+                conn.commit()
         return True
     return create_user(discord_id)
 
