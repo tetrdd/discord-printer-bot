@@ -42,7 +42,8 @@ class FilesCog(commands.Cog):
             return
         
         # Sort files by modification time (newest first)
-        files.sort(key=lambda x: x.get("modified", 0), reverse=True)
+        # Moonraker uses 'modified', OctoPrint uses 'date'
+        files.sort(key=lambda x: x.get("modified", x.get("date", 0)), reverse=True)
         
         files_per_page = 10
         total_pages = (len(files) + files_per_page - 1) // files_per_page

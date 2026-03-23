@@ -32,7 +32,7 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
             max_length=50,
             required=True,
         )
-        self.append_item(self.name_input)
+        self.add_item(self.name_input)
         
         self.url_input = TextInput(
             label="OctoEverywhere API URL or Key",
@@ -41,21 +41,21 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
             max_length=200,
             required=True,
         )
-        self.append_item(self.url_input)
+        self.add_item(self.url_input)
         
         self.camera_input = TextInput(
             label="Camera Snapshot URL (Optional)",
             placeholder="http://...",
             required=False,
         )
-        self.append_item(self.camera_input)
+        self.add_item(self.camera_input)
 
         self.stream_input = TextInput(
             label="Camera Stream URL (Optional)",
             placeholder="http://...",
             required=False,
         )
-        self.append_item(self.stream_input)
+        self.add_item(self.stream_input)
         
         self.privacy_select = TextInput(
             label="Privacy (public/private)",
@@ -65,7 +65,7 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
             required=True,
             default="public",
         )
-        self.append_item(self.privacy_select)
+        self.add_item(self.privacy_select)
     
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -137,7 +137,7 @@ class UserSettingsModal(Modal, title="Update Your Settings"):
             required=False,
             default=user_data.get('timezone', '') if user_data else '',
         )
-        self.append_item(self.timezone_input)
+        self.add_item(self.timezone_input)
         
         self.language_input = TextInput(
             label="Language",
@@ -147,7 +147,7 @@ class UserSettingsModal(Modal, title="Update Your Settings"):
             required=False,
             default=user_data.get('language', 'en') if user_data else 'en',
         )
-        self.append_item(self.language_input)
+        self.add_item(self.language_input)
         
         self.notify_channel_input = TextInput(
             label="Notification Channel ID",
@@ -157,7 +157,7 @@ class UserSettingsModal(Modal, title="Update Your Settings"):
             required=False,
             default=user_data.get('notify_channel', '') if user_data else '',
         )
-        self.append_item(self.notify_channel_input)
+        self.add_item(self.notify_channel_input)
     
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -206,7 +206,7 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
             required=True,
             default=printer_data.get('name', ''),
         )
-        self.append_item(self.name_input)
+        self.add_item(self.name_input)
         
         self.url_input = TextInput(
             label="OctoEverywhere API URL or Key",
@@ -215,21 +215,21 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
             required=True,
             default=printer_data.get('url', ''),
         )
-        self.append_item(self.url_input)
+        self.add_item(self.url_input)
         
         self.camera_input = TextInput(
             label="Camera Snapshot URL",
             required=False,
             default=printer_data.get('camera_url', ''),
         )
-        self.append_item(self.camera_input)
+        self.add_item(self.camera_input)
 
         self.stream_input = TextInput(
             label="Camera Stream URL",
             required=False,
             default=printer_data.get('stream_url', ''),
         )
-        self.append_item(self.stream_input)
+        self.add_item(self.stream_input)
         
         privacy = printer_data.get('privacy', 'public')
         self.privacy_input = TextInput(
@@ -239,7 +239,7 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
             required=True,
             default=privacy,
         )
-        self.append_item(self.privacy_input)
+        self.add_item(self.privacy_input)
     
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

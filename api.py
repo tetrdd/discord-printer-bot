@@ -128,13 +128,13 @@ async def _post_command(command: str, user_id: int) -> bool:
     
     if printer_type == "octoprint":
         # OctoPrint API
-        data = {"command": "gcode", "script": command}
-        result = await _post("/api/printer/comm", data, user_id)
+        data = {"command": "command", "commands": [command]}
+        result = await _post("/api/printer/command", data, user_id)
         return result is not None
     else:
         # Moonraker/OctoEverywhere
-        encoded = urllib.parse.quote(command)
-        result = await _post(f"/printer/gcode/script?script={encoded}", None, user_id)
+        data = {"script": command}
+        result = await _post("/printer/gcode/script", data, user_id)
         return result is not None
 
 
