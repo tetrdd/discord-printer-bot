@@ -34,33 +34,28 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
         )
         self.append_item(self.name_input)
         
-        self.type_select = TextInput(
-            label="Printer Type",
-            placeholder="moonraker, octoprint, or octoeverywhere",
-            min_length=1,
-            max_length=20,
-            required=True,
-            default="moonraker",
-        )
-        self.append_item(self.type_select)
-        
         self.url_input = TextInput(
-            label="Printer URL",
-            placeholder="http://192.168.1.100:7125",
+            label="OctoEverywhere API URL or Key",
+            placeholder="e.g. https://api.octoeverywhere.com/api/YOUR_KEY",
             min_length=1,
             max_length=200,
             required=True,
         )
         self.append_item(self.url_input)
         
-        self.api_key_input = TextInput(
-            label="API Key (optional)",
-            placeholder="Leave blank if not required",
-            min_length=0,
-            max_length=100,
+        self.camera_input = TextInput(
+            label="Camera Snapshot URL (Optional)",
+            placeholder="http://...",
             required=False,
         )
-        self.append_item(self.api_key_input)
+        self.append_item(self.camera_input)
+
+        self.stream_input = TextInput(
+            label="Camera Stream URL (Optional)",
+            placeholder="http://...",
+            required=False,
+        )
+        self.append_item(self.stream_input)
         
         self.privacy_select = TextInput(
             label="Privacy (public/private)",
@@ -79,15 +74,6 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
         # Ensure user exists
         db.ensure_user_exists(user_id)
         
-        # Validate printer type
-        printer_type = self.type_select.value.lower().strip()
-        if printer_type not in ('moonraker', 'octoprint', 'octoeverywhere'):
-            await interaction.response.send_message(
-                "❌ Invalid printer type. Must be `moonraker`, `octoprint`, or `octoeverywhere`.",
-                ephemeral=True,
-            )
-            return
-        
         # Validate privacy
         privacy = self.privacy_select.value.lower().strip()
         if privacy not in ('public', 'private'):
@@ -102,19 +88,20 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
             printer_id = db.create_printer(
                 owner_discord_id=user_id,
                 name=self.name_input.value.strip(),
-                printer_type=printer_type,
+                printer_type="octoeverywhere",
                 url=self.url_input.value.strip(),
-                api_key=self.api_key_input.value.strip() or None,
+                api_key=None,
                 privacy=privacy,
+                camera_url=self.camera_input.value.strip() or None,
+                stream_url=self.stream_input.value.strip() or None,
             )
             
             embed = discord.Embed(
                 title="✅ Printer Registered!",
-                description=f"Your printer **{self.name_input.value.strip()}** has been registered.",
+                description=f"Your printer **{self.name_input.value.strip()}** has been registered via OctoEverywhere.",
                 color=discord.Color.green(),
             )
             embed.add_field(name="Printer ID", value=f"`{printer_id}`", inline=True)
-            embed.add_field(name="Type", value=printer_type, inline=True)
             embed.add_field(name="Privacy", value=privacy, inline=True)
             embed.add_field(
                 name="Next Steps",
@@ -131,14 +118,6 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
                 f"❌ Failed to register printer: {str(e)}",
                 ephemeral=True,
             )
-    
-    async def on_error(self, interaction: discord.Interaction, error: Exception):
-        """Handle modal errors."""
-        logger.error(f"Modal error: {error}")
-        await interaction.response.send_message(
-            "❌ An error occurred while registering your printer.",
-            ephemeral=True,
-        )
 
 
 class UserSettingsModal(Modal, title="Update Your Settings"):
@@ -230,7 +209,7 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
         self.append_item(self.name_input)
         
         self.url_input = TextInput(
-            label="Printer URL",
+            label="OctoEverywhere API URL or Key",
             min_length=1,
             max_length=200,
             required=True,
@@ -238,14 +217,19 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
         )
         self.append_item(self.url_input)
         
-        self.api_key_input = TextInput(
-            label="API Key",
-            min_length=0,
-            max_length=100,
+        self.camera_input = TextInput(
+            label="Camera Snapshot URL",
             required=False,
-            default=printer_data.get('api_key', ''),
+            default=printer_data.get('camera_url', ''),
         )
-        self.append_item(self.api_key_input)
+        self.append_item(self.camera_input)
+
+        self.stream_input = TextInput(
+            label="Camera Stream URL",
+            required=False,
+            default=printer_data.get('stream_url', ''),
+        )
+        self.append_item(self.stream_input)
         
         privacy = printer_data.get('privacy', 'public')
         self.privacy_input = TextInput(
@@ -283,8 +267,9 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
             printer_id=self.printer_id,
             name=self.name_input.value.strip(),
             url=self.url_input.value.strip(),
-            api_key=self.api_key_input.value.strip() or None,
             privacy=privacy,
+            camera_url=self.camera_input.value.strip() or None,
+            stream_url=self.stream_input.value.strip() or None,
         )
         
         embed = discord.Embed(
@@ -338,6 +323,15 @@ class PrinterActionView(View):
                     custom_id=f"printer_users:{printer_id}",
                 )
             )
+
+        # Select as active
+        self.add_item(
+            Button(
+                style=discord.ButtonStyle.success,
+                label="Set as Active",
+                custom_id=f"printer_activate:{printer_id}",
+            )
+        )
 
 
 class UserSettingsView(View):
@@ -401,7 +395,7 @@ class PrinterConfigCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
     
-    @app_commands.command(name="register-printer", description="Register a new printer")
+    @app_commands.command(name="register-printer", description="Register a new printer via OctoEverywhere")
     async def register_printer(self, interaction: discord.Interaction):
         """Open modal to register a new printer."""
         await interaction.response.send_modal(RegisterPrinterModal())
@@ -438,6 +432,11 @@ class PrinterConfigCog(commands.Cog):
                 value=f"`{user_data.get('notify_channel', 'Not set')}`",
                 inline=True,
             )
+            active_id = user_data.get('active_printer_id')
+            if active_id:
+                p = db.get_printer(active_id)
+                active_name = p['name'] if p else "Unknown"
+                embed.add_field(name="Active Printer", value=f"**{active_name}** (`{active_id}`)", inline=False)
         else:
             embed.description = "No settings configured yet. Click the button below to set them up!"
         
@@ -487,11 +486,13 @@ class PrinterConfigCog(commands.Cog):
         
         embed.add_field(name="Type", value=printer['type'], inline=True)
         embed.add_field(name="Privacy", value=printer['privacy'], inline=True)
-        embed.add_field(name="URL", value=f"`{printer['url']}`", inline=False)
         
-        if printer.get('api_key'):
-            key_preview = printer['api_key'][:8] + "..." if len(printer['api_key']) > 8 else printer['api_key']
-            embed.add_field(name="API Key", value=f"`{key_preview}`", inline=True)
+        if is_owner:
+            embed.add_field(name="URL/Key", value=f"`{printer['url']}`", inline=False)
+            if printer.get('camera_url'):
+                embed.add_field(name="Camera URL", value=f"`{printer['camera_url']}`", inline=False)
+            if printer.get('stream_url'):
+                embed.add_field(name="Stream URL", value=f"`{printer['stream_url']}`", inline=False)
         
         # Owner info
         owner_id = printer['owner_discord_id']
@@ -506,8 +507,8 @@ class PrinterConfigCog(commands.Cog):
                 users_str = "None"
             embed.add_field(name="Allowed Users", value=users_str, inline=False)
         
-        # Add edit button for owner
-        view = PrinterActionView(printer_id, is_owner) if is_owner else None
+        # Add buttons
+        view = PrinterActionView(printer_id, is_owner)
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
@@ -536,6 +537,8 @@ class PrinterConfigCog(commands.Cog):
             color=discord.Color.green(),
         )
         
+        active_id = db.get_active_printer_id(user_id)
+
         for printer in printers:
             pid = printer['printer_id']
             name = printer['name']
@@ -544,9 +547,10 @@ class PrinterConfigCog(commands.Cog):
             
             owner_emoji = "👑" if db.is_printer_owner(user_id, pid) else ""
             privacy_emoji = "🔒" if privacy == 'private' else "🌍"
+            active_emoji = "⭐ " if pid == active_id else ""
             
             embed.add_field(
-                name=f"{owner_emoji} {name}",
+                name=f"{active_emoji}{owner_emoji} {name}",
                 value=f"ID: `{pid}` • {ptype} • {privacy_emoji}",
                 inline=False,
             )
