@@ -268,7 +268,6 @@ class PrinterBot(commands.Bot):
                 logger.error(f"Failed to load cog {cog}: {e}")
         
         # Sync commands
-        self.tree.copy_global_to(guilds=None)
         await self.tree.sync()
         logger.info("Synced slash commands")
     
