@@ -24,12 +24,13 @@ class ControlCog(commands.Cog):
         """Show print control menu."""
         await self.show_control(interaction)
 
-    async def show_control(self, interaction: discord.Interaction, edit: bool = False):
+    async def show_control(self, interaction: discord.Interaction, edit: bool = False, printer_id: Optional[int] = None):
         user_id = interaction.user.id
-        active_printer_id = db.get_active_printer_id(user_id)
+        if printer_id is None:
+            printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_control_permission(user_id, active_printer_id)
+            permissions.check_control_permission(user_id, printer_id)
         except permissions.PermissionError as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"❌ {e}", ephemeral=True)
@@ -37,7 +38,11 @@ class ControlCog(commands.Cog):
                 await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        status_data = await api.printer_status(user_id)
+        # We must use the owner's ID for API calls if we are not the owner
+        printer = db.get_printer(printer_id)
+        owner_id = printer['owner_discord_id']
+
+        status_data = await api.printer_status(owner_id, printer_id)
         state = "unknown"
         
         if status_data:
@@ -52,11 +57,14 @@ class ControlCog(commands.Cog):
             color=0x0099FF,
         )
         
-        view = ControlView(user_id, state)
+        view = ControlView(owner_id, state, printer_id)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
 
         if edit:
-            await interaction.response.edit_message(embed=embed, view=view)
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=view)
+            else:
+                await interaction.edit_original_response(embed=embed, view=view)
         else:
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
@@ -196,10 +204,11 @@ class ControlCog(commands.Cog):
 class ControlView(discord.ui.View):
     """Print control view."""
     
-    def __init__(self, user_id: int, state: str):
+    def __init__(self, user_id: int, state: str, printer_id: Optional[int] = None):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.state = state
+        self.printer_id = printer_id
         
         # Update button states based on current print state
         self.pause_btn.disabled = state != "printing"
@@ -209,7 +218,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.primary)
     async def pause_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        result = await api.pause_print(self.user_id)
+        result = await api.pause_print(self.user_id, self.printer_id)
         await interaction.followup.send(
             "✅ Paused" if result else "❌ Failed",
             ephemeral=True,
@@ -218,7 +227,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success)
     async def resume_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        result = await api.resume_print(self.user_id)
+        result = await api.resume_print(self.user_id, self.printer_id)
         await interaction.followup.send(
             "✅ Resumed" if result else "❌ Failed",
             ephemeral=True,
@@ -234,7 +243,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="🏠 Home", style=discord.ButtonStyle.secondary)
     async def home_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        result = await api.home_axes("XYZ", self.user_id)
+        result = await api.home_axes("XYZ", self.user_id, self.printer_id)
         await interaction.followup.send(
             "✅ Homed" if result else "❌ Failed",
             ephemeral=True,
@@ -243,7 +252,7 @@ class ControlView(discord.ui.View):
     @discord.ui.button(label="🔌 Motors Off", style=discord.ButtonStyle.secondary)
     async def motors_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        result = await api.motors_off(self.user_id)
+        result = await api.motors_off(self.user_id, self.printer_id)
         await interaction.followup.send(
             "✅ Disabled" if result else "❌ Failed",
             ephemeral=True,
