@@ -24,12 +24,13 @@ class CameraCog(commands.Cog):
         """Take and display a camera snapshot."""
         await self.show_camera(interaction)
 
-    async def show_camera(self, interaction: discord.Interaction, edit: bool = False):
+    async def show_camera(self, interaction: discord.Interaction, edit: bool = False, printer_id: Optional[int] = None):
         user_id = interaction.user.id
-        active_printer_id = db.get_active_printer_id(user_id)
+        if printer_id is None:
+            printer_id = db.get_active_printer_id(user_id)
         
         try:
-            permissions.check_view_permission(user_id, active_printer_id)
+            permissions.check_view_permission(user_id, printer_id)
         except permissions.PermissionError as e:
             if interaction.response.is_done():
                 await interaction.followup.send(f"❌ {e}", ephemeral=True)
@@ -38,12 +39,16 @@ class CameraCog(commands.Cog):
             return
         
         if edit:
-            await interaction.response.defer()
+            if not interaction.response.is_done():
+                await interaction.response.defer()
         else:
             await interaction.response.defer(ephemeral=True)
         
+        printer = db.get_printer(printer_id)
+        owner_id = printer['owner_discord_id']
+
         # Get snapshot
-        snapshot_bytes = await api.snapshot(user_id)
+        snapshot_bytes = await api.snapshot(owner_id, printer_id)
         
         if not snapshot_bytes:
             await interaction.followup.send(
@@ -53,13 +58,12 @@ class CameraCog(commands.Cog):
             return
         
         # Get stream URL for embed
-        stream_url = await api.get_stream_url(user_id)
+        stream_url = await api.get_stream_url(owner_id, printer_id)
         
         # Send image
         file = discord.File(io.BytesIO(snapshot_bytes), filename="snapshot.jpg")
 
-        active_printer = db.get_active_printer(user_id)
-        printer_name = active_printer['name'] if active_printer else "Printer"
+        printer_name = printer['name'] if printer else "Printer"
         
         embed = discord.Embed(
             title="📷 Camera Snapshot",

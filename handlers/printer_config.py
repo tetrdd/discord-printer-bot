@@ -120,168 +120,129 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
             )
 
 
-class UserSettingsModal(Modal, title="Update Your Settings"):
-    """Modal for updating user settings."""
-    
-    def __init__(self, user: discord.User):
+class EditTimezoneModal(Modal, title="Edit Timezone"):
+    timezone_input = TextInput(
+        label="Timezone",
+        placeholder="e.g., Europe/Berlin, America/New_York",
+        min_length=0,
+        max_length=50,
+        required=False,
+    )
+
+    def __init__(self, current_timezone: str):
         super().__init__()
-        
-        # Get current user data
-        user_data = db.get_user(user.id)
-        
-        self.timezone_input = TextInput(
-            label="Timezone",
-            placeholder="e.g., Europe/Berlin, America/New_York",
-            min_length=0,
-            max_length=50,
-            required=False,
-            default=user_data.get('timezone', '') if user_data else '',
-        )
-        self.add_item(self.timezone_input)
-        
-        self.language_input = TextInput(
-            label="Language",
-            placeholder="e.g., en, de, ru",
-            min_length=0,
-            max_length=10,
-            required=False,
-            default=user_data.get('language', 'en') if user_data else 'en',
-        )
-        self.add_item(self.language_input)
-        
-        self.notify_channel_input = TextInput(
-            label="Notification Channel ID",
-            placeholder="Discord channel ID for notifications",
-            min_length=0,
-            max_length=30,
-            required=False,
-            default=user_data.get('notify_channel', '') if user_data else '',
-        )
-        self.add_item(self.notify_channel_input)
-    
+        self.timezone_input.default = current_timezone or ""
+
     async def on_submit(self, interaction: discord.Interaction):
-        """Handle modal submission."""
-        user_id = interaction.user.id
-        
-        # Ensure user exists
-        db.ensure_user_exists(user_id)
-        
-        # Update user settings
-        db.update_user(
-            discord_id=user_id,
-            timezone=self.timezone_input.value.strip() or None,
-            language=self.language_input.value.strip() or 'en',
-            notify_channel=self.notify_channel_input.value.strip() or None,
-        )
-        
-        embed = discord.Embed(
-            title="✅ Settings Updated!",
-            description="Your personal settings have been saved.",
-            color=discord.Color.green(),
-        )
-        
-        if self.timezone_input.value.strip():
-            embed.add_field(name="Timezone", value=f"`{self.timezone_input.value.strip()}`", inline=True)
-        if self.language_input.value.strip():
-            embed.add_field(name="Language", value=f"`{self.language_input.value.strip()}`", inline=True)
-        if self.notify_channel_input.value.strip():
-            embed.add_field(name="Notify Channel", value=f"`{self.notify_channel_input.value.strip()}`", inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"User {user_id} updated their settings")
+        if db.update_user(interaction.user.id, timezone=self.timezone_input.value.strip() or None):
+            await interaction.response.send_message(f"✅ Timezone updated to **{self.timezone_input.value}**", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update timezone.", ephemeral=True)
 
+class EditLanguageModal(Modal, title="Edit Language"):
+    language_input = TextInput(
+        label="Language",
+        placeholder="e.g., en, de, ru",
+        min_length=0,
+        max_length=10,
+        required=False,
+    )
 
-class PrinterSettingsModal(Modal, title="Update Printer Settings"):
-    """Modal for updating printer settings."""
-    
-    def __init__(self, printer_id: int, printer_data: dict):
+    def __init__(self, current_language: str):
         super().__init__()
-        
+        self.language_input.default = current_language or "en"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if db.update_user(interaction.user.id, language=self.language_input.value.strip() or 'en'):
+            await interaction.response.send_message(f"✅ Language updated to **{self.language_input.value}**", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update language.", ephemeral=True)
+
+class EditNotifyChannelModal(Modal, title="Edit Notification Channel"):
+    channel_input = TextInput(
+        label="Notification Channel ID",
+        placeholder="Discord channel ID",
+        min_length=0,
+        max_length=30,
+        required=False,
+    )
+
+    def __init__(self, current_channel: str):
+        super().__init__()
+        self.channel_input.default = current_channel or ""
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if db.update_user(interaction.user.id, notify_channel=self.channel_input.value.strip() or None):
+            await interaction.response.send_message(f"✅ Notification channel updated to **{self.channel_input.value}**", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update channel.", ephemeral=True)
+
+
+class EditNameModal(Modal, title="Edit Printer Name"):
+    name_input = TextInput(
+        label="Printer Name",
+        min_length=1,
+        max_length=50,
+        required=True,
+    )
+
+    def __init__(self, printer_id: int, current_name: str):
+        super().__init__()
         self.printer_id = printer_id
-        
-        self.name_input = TextInput(
-            label="Printer Name",
-            min_length=1,
-            max_length=50,
-            required=True,
-            default=printer_data.get('name', ''),
-        )
-        self.add_item(self.name_input)
-        
-        self.url_input = TextInput(
-            label="OctoEverywhere API URL or Key",
-            min_length=1,
-            max_length=200,
-            required=True,
-            default=printer_data.get('url', ''),
-        )
-        self.add_item(self.url_input)
-        
-        self.camera_input = TextInput(
-            label="Camera Snapshot URL",
-            required=False,
-            default=printer_data.get('camera_url', ''),
-        )
-        self.add_item(self.camera_input)
+        self.name_input.default = current_name
 
-        self.stream_input = TextInput(
-            label="Camera Stream URL",
-            required=False,
-            default=printer_data.get('stream_url', ''),
-        )
-        self.add_item(self.stream_input)
-        
-        privacy = printer_data.get('privacy', 'public')
-        self.privacy_input = TextInput(
-            label="Privacy (public/private/unlisted)",
-            min_length=1,
-            max_length=10,
-            required=True,
-            default=privacy,
-        )
-        self.add_item(self.privacy_input)
-    
     async def on_submit(self, interaction: discord.Interaction):
-        """Handle modal submission."""
-        user_id = interaction.user.id
-        
-        # Validate privacy
-        privacy = self.privacy_input.value.lower().strip()
-        if privacy not in ('public', 'private', 'unlisted'):
-            await interaction.response.send_message(
-                "❌ Invalid privacy setting. Must be `public`, `private`, or `unlisted`.",
-                ephemeral=True,
-            )
-            return
-        
-        # Check ownership
-        if not db.is_printer_owner(user_id, self.printer_id):
-            await interaction.response.send_message(
-                "❌ Only the printer owner can change these settings.",
-                ephemeral=True,
-            )
-            return
-        
-        # Update printer
-        db.update_printer(
-            printer_id=self.printer_id,
-            name=self.name_input.value.strip(),
-            url=self.url_input.value.strip(),
-            privacy=privacy,
+        if db.update_printer(self.printer_id, name=self.name_input.value.strip()):
+            await interaction.response.send_message(f"✅ Printer name updated to **{self.name_input.value}**", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update name.", ephemeral=True)
+
+class EditConnectionModal(Modal, title="Edit Connection Settings"):
+    url_input = TextInput(
+        label="OctoEverywhere API URL or Key",
+        min_length=1,
+        max_length=200,
+        required=True,
+    )
+
+    def __init__(self, printer_id: int, current_url: str):
+        super().__init__()
+        self.printer_id = printer_id
+        self.url_input.default = current_url
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if db.update_printer(self.printer_id, url=self.url_input.value.strip()):
+            await interaction.response.send_message("✅ Connection settings updated.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update connection.", ephemeral=True)
+
+class EditCameraModal(Modal, title="Edit Camera Settings"):
+    camera_input = TextInput(
+        label="Camera Snapshot URL",
+        placeholder="http://...",
+        required=False,
+    )
+    stream_input = TextInput(
+        label="Camera Stream URL",
+        placeholder="http://...",
+        required=False,
+    )
+
+    def __init__(self, printer_id: int, current_camera: str, current_stream: str):
+        super().__init__()
+        self.printer_id = printer_id
+        self.camera_input.default = current_camera or ""
+        self.stream_input.default = current_stream or ""
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if db.update_printer(
+            self.printer_id,
             camera_url=self.camera_input.value.strip() or None,
-            stream_url=self.stream_input.value.strip() or None,
-        )
-        
-        embed = discord.Embed(
-            title="✅ Printer Settings Updated!",
-            description=f"Printer **{self.name_input.value.strip()}** has been updated.",
-            color=discord.Color.green(),
-        )
-        embed.add_field(name="Printer ID", value=f"`{self.printer_id}`", inline=True)
-        embed.add_field(name="Privacy", value=privacy, inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"User {user_id} updated printer {self.printer_id}")
+            stream_url=self.stream_input.value.strip() or None
+        ):
+            await interaction.response.send_message("✅ Camera settings updated.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update camera settings.", ephemeral=True)
 
 
 # ── Views (Buttons) ───────────────────────────────────────────────────────────
@@ -294,52 +255,75 @@ class PrinterActionView(View):
         self.printer_id = printer_id
         self.is_owner = is_owner
         
-        # Edit button (owner only)
         if is_owner:
+            # Row 0: Basic Settings
             self.add_item(
                 Button(
                     style=discord.ButtonStyle.primary,
-                    label="Edit Settings",
-                    custom_id=f"printer_edit:{printer_id}",
+                    label="📝 Edit Name",
+                    custom_id=f"printer_edit_name:{printer_id}",
+                    row=0
                 )
             )
-        
-        # Delete button (owner only)
-        if is_owner:
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.primary,
+                    label="🔗 Edit Connection",
+                    custom_id=f"printer_edit_conn:{printer_id}",
+                    row=0
+                )
+            )
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.primary,
+                    label="📷 Edit Camera",
+                    custom_id=f"printer_edit_cam:{printer_id}",
+                    row=0
+                )
+            )
+
+            # Row 1: Management & Privacy
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.secondary,
+                    label="🔓 Toggle Privacy",
+                    custom_id=f"printer_privacy_toggle:{printer_id}",
+                    row=1
+                )
+            )
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.secondary,
+                    label="👥 Manage Users",
+                    custom_id=f"printer_users:{printer_id}",
+                    row=1
+                )
+            )
+
+            # Row 2: Actions
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.success,
+                    label="⭐ Set as Active",
+                    custom_id=f"printer_activate:{printer_id}",
+                    row=2
+                )
+            )
             self.add_item(
                 Button(
                     style=discord.ButtonStyle.danger,
-                    label="Delete Printer",
+                    label="🗑️ Delete Printer",
                     custom_id=f"printer_delete:{printer_id}",
+                    row=2
                 )
             )
-        
-        # Manage users button (owner only)
-        if is_owner:
+        else:
+            # Non-owner view
             self.add_item(
                 Button(
-                    style=discord.ButtonStyle.secondary,
-                    label="Manage Users",
-                    custom_id=f"printer_users:{printer_id}",
-                )
-            )
-
-        # Select as active
-        self.add_item(
-            Button(
-                style=discord.ButtonStyle.success,
-                label="Set as Active",
-                custom_id=f"printer_activate:{printer_id}",
-            )
-        )
-
-        # Toggle Privacy
-        if is_owner:
-            self.add_item(
-                Button(
-                    style=discord.ButtonStyle.secondary,
-                    label="Toggle Privacy",
-                    custom_id=f"printer_privacy_toggle:{printer_id}",
+                    style=discord.ButtonStyle.success,
+                    label="⭐ Set as Active",
+                    custom_id=f"printer_activate:{printer_id}",
                 )
             )
 
@@ -347,16 +331,39 @@ class PrinterActionView(View):
 class UserSettingsView(View):
     """View with buttons for user settings."""
     
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, active_printer_id: Optional[int] = None):
         super().__init__(timeout=None)
         
         self.add_item(
             Button(
                 style=discord.ButtonStyle.primary,
-                label="Edit Settings",
-                custom_id=f"user_settings_edit:{user_id}",
+                label="🌐 Timezone",
+                custom_id=f"user_edit_tz:{user_id}",
             )
         )
+        self.add_item(
+            Button(
+                style=discord.ButtonStyle.primary,
+                label="🗣️ Language",
+                custom_id=f"user_edit_lang:{user_id}",
+            )
+        )
+        self.add_item(
+            Button(
+                style=discord.ButtonStyle.primary,
+                label="🔔 Notifications",
+                custom_id=f"user_edit_notify:{user_id}",
+            )
+        )
+
+        if active_printer_id:
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.secondary,
+                    label="🖨️ Printer Settings",
+                    custom_id=f"user_manage_printer:{active_printer_id}",
+                )
+            )
 
 
 class AllowedUsersView(View):
@@ -453,7 +460,8 @@ class PrinterConfigCog(commands.Cog):
         else:
             embed.description = "No settings configured yet. Click the button below to set them up!"
         
-        view = UserSettingsView(user_id)
+        active_id = user_data.get('active_printer_id') if user_data else None
+        view = UserSettingsView(user_id, active_id)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
         
         if edit:
@@ -466,30 +474,40 @@ class PrinterConfigCog(commands.Cog):
         description="View or update printer settings"
     )
     @app_commands.describe(printer_id="Printer ID to manage")
-    async def printer_settings(
+    async def printer_settings_cmd(
         self,
         interaction: discord.Interaction,
         printer_id: int,
     ):
         """View or update printer settings."""
+        await self.printer_settings(interaction, printer_id)
+
+    async def printer_settings(
+        self,
+        interaction: discord.Interaction,
+        printer_id: int,
+        edit: bool = False,
+    ):
         user_id = interaction.user.id
         
         # Get printer
         printer = db.get_printer(printer_id)
         
         if not printer:
-            await interaction.response.send_message(
-                f"❌ Printer ID `{printer_id}` not found.",
-                ephemeral=True,
-            )
+            msg = f"❌ Printer ID `{printer_id}` not found."
+            if edit:
+                await interaction.response.edit_message(content=msg, embed=None, view=None)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return
         
         # Check access
         if not db.user_can_view(user_id, printer_id):
-            await interaction.response.send_message(
-                "❌ You don't have permission to view this printer.",
-                ephemeral=True,
-            )
+            msg = "❌ You don't have permission to view this printer."
+            if edit:
+                await interaction.response.edit_message(content=msg, embed=None, view=None)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return
         
         is_owner = db.is_printer_owner(user_id, printer_id)
@@ -501,8 +519,11 @@ class PrinterConfigCog(commands.Cog):
             color=discord.Color.green() if is_owner else discord.Color.blue(),
         )
         
+        privacy = printer['privacy']
+        privacy_emoji = {"public": "🌍", "private": "🔒", "unlisted": "👻"}.get(privacy, "❓")
+
         embed.add_field(name="Type", value=printer['type'], inline=True)
-        embed.add_field(name="Privacy", value=printer['privacy'], inline=True)
+        embed.add_field(name="Privacy", value=f"{privacy_emoji} {privacy.capitalize()}", inline=True)
         
         if is_owner:
             embed.add_field(name="URL/Key", value=f"`{printer['url']}`", inline=False)
@@ -527,7 +548,13 @@ class PrinterConfigCog(commands.Cog):
         # Add buttons
         view = PrinterActionView(printer_id, is_owner)
         
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        if edit:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=view)
+            else:
+                await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @app_commands.command(
         name="list-printers",

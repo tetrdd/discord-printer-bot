@@ -46,10 +46,16 @@ class PrinterBot(commands.Bot):
         if interaction.type == discord.InteractionType.component:
             custom_id = interaction.data.get('custom_id', '')
             
-            # Handle printer edit button
-            if custom_id.startswith('printer_edit:'):
+            # Handle printer edit buttons
+            if custom_id.startswith('printer_edit_name:'):
                 printer_id = int(custom_id.split(':')[1])
-                await self.handle_printer_edit(interaction, printer_id)
+                await self.handle_printer_edit_name(interaction, printer_id)
+            elif custom_id.startswith('printer_edit_conn:'):
+                printer_id = int(custom_id.split(':')[1])
+                await self.handle_printer_edit_conn(interaction, printer_id)
+            elif custom_id.startswith('printer_edit_cam:'):
+                printer_id = int(custom_id.split(':')[1])
+                await self.handle_printer_edit_cam(interaction, printer_id)
             
             # Handle printer delete button
             elif custom_id.startswith('printer_delete:'):
@@ -61,10 +67,22 @@ class PrinterBot(commands.Bot):
                 printer_id = int(custom_id.split(':')[1])
                 await self.handle_printer_users(interaction, printer_id)
             
-            # Handle user settings edit button
-            elif custom_id.startswith('user_settings_edit:'):
+            # Handle user settings edit buttons
+            elif custom_id.startswith('user_edit_tz:'):
                 user_id = int(custom_id.split(':')[1])
-                await self.handle_user_settings_edit(interaction, user_id)
+                await self.handle_user_edit_tz(interaction, user_id)
+            elif custom_id.startswith('user_edit_lang:'):
+                user_id = int(custom_id.split(':')[1])
+                await self.handle_user_edit_lang(interaction, user_id)
+            elif custom_id.startswith('user_edit_notify:'):
+                user_id = int(custom_id.split(':')[1])
+                await self.handle_user_edit_notify(interaction, user_id)
+            elif custom_id.startswith('user_manage_printer:'):
+                printer_id = int(custom_id.split(':')[1])
+                from handlers.printer_config import PrinterConfigCog
+                cog = self.get_cog("PrinterConfigCog")
+                if cog:
+                    await cog.printer_settings(interaction, printer_id)
 
             # Handle printer activation button
             elif custom_id.startswith('printer_activate:'):
@@ -83,29 +101,29 @@ class PrinterBot(commands.Bot):
                 if cog:
                     await cog.show_main_menu(interaction, edit=True)
     
-    async def handle_printer_edit(self, interaction: discord.Interaction, printer_id: int):
-        """Handle printer edit button click."""
-        from handlers.printer_config import PrinterSettingsModal
-        
-        user_id = interaction.user.id
-        
-        # Check ownership
-        if not db.is_printer_owner(user_id, printer_id):
-            await interaction.response.send_message(
-                "❌ Only the printer owner can edit these settings.",
-                ephemeral=True,
-            )
-            return
-        
+    async def handle_printer_edit_name(self, interaction: discord.Interaction, printer_id: int):
+        from handlers.printer_config import EditNameModal
         printer = db.get_printer(printer_id)
-        if not printer:
-            await interaction.response.send_message(
-                "❌ Printer not found.",
-                ephemeral=True,
-            )
+        if not printer or not db.is_printer_owner(interaction.user.id, printer_id):
+            await interaction.response.send_message("❌ Not found or no permission.", ephemeral=True)
             return
-        
-        await interaction.response.send_modal(PrinterSettingsModal(printer_id, printer))
+        await interaction.response.send_modal(EditNameModal(printer_id, printer['name']))
+
+    async def handle_printer_edit_conn(self, interaction: discord.Interaction, printer_id: int):
+        from handlers.printer_config import EditConnectionModal
+        printer = db.get_printer(printer_id)
+        if not printer or not db.is_printer_owner(interaction.user.id, printer_id):
+            await interaction.response.send_message("❌ Not found or no permission.", ephemeral=True)
+            return
+        await interaction.response.send_modal(EditConnectionModal(printer_id, printer['url']))
+
+    async def handle_printer_edit_cam(self, interaction: discord.Interaction, printer_id: int):
+        from handlers.printer_config import EditCameraModal
+        printer = db.get_printer(printer_id)
+        if not printer or not db.is_printer_owner(interaction.user.id, printer_id):
+            await interaction.response.send_message("❌ Not found or no permission.", ephemeral=True)
+            return
+        await interaction.response.send_modal(EditCameraModal(printer_id, printer.get('camera_url', ''), printer.get('stream_url', '')))
     
     async def handle_printer_delete(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer delete button click."""
@@ -225,19 +243,29 @@ class PrinterBot(commands.Bot):
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
-    async def handle_user_settings_edit(self, interaction: discord.Interaction, user_id: int):
-        """Handle user settings edit button click."""
-        from handlers.printer_config import UserSettingsModal
-        
+    async def handle_user_edit_tz(self, interaction: discord.Interaction, user_id: int):
+        from handlers.printer_config import EditTimezoneModal
         if interaction.user.id != user_id:
-            await interaction.response.send_message(
-                "❌ You can only edit your own settings.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message("❌ Not yours.", ephemeral=True)
             return
-        
-        user = interaction.user
-        await interaction.response.send_modal(UserSettingsModal(user))
+        user_data = db.get_user(user_id)
+        await interaction.response.send_modal(EditTimezoneModal(user_data.get('timezone', '') if user_data else ''))
+
+    async def handle_user_edit_lang(self, interaction: discord.Interaction, user_id: int):
+        from handlers.printer_config import EditLanguageModal
+        if interaction.user.id != user_id:
+            await interaction.response.send_message("❌ Not yours.", ephemeral=True)
+            return
+        user_data = db.get_user(user_id)
+        await interaction.response.send_modal(EditLanguageModal(user_data.get('language', 'en') if user_data else 'en'))
+
+    async def handle_user_edit_notify(self, interaction: discord.Interaction, user_id: int):
+        from handlers.printer_config import EditNotifyChannelModal
+        if interaction.user.id != user_id:
+            await interaction.response.send_message("❌ Not yours.", ephemeral=True)
+            return
+        user_data = db.get_user(user_id)
+        await interaction.response.send_modal(EditNotifyChannelModal(user_data.get('notify_channel', '') if user_data else ''))
 
     async def handle_printer_activate(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer activation button click."""
@@ -278,7 +306,12 @@ class PrinterBot(commands.Bot):
             new_privacy = 'public'
 
         if db.update_printer(printer_id, privacy=new_privacy):
-            await interaction.response.send_message(f"✅ Printer privacy set to **{new_privacy.capitalize()}**.", ephemeral=True)
+            from handlers.printer_config import PrinterConfigCog
+            cog = self.get_cog("PrinterConfigCog")
+            if cog:
+                await cog.printer_settings(interaction, printer_id, edit=True)
+            else:
+                await interaction.response.send_message(f"✅ Printer privacy set to **{new_privacy.capitalize()}**.", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Failed to update privacy.", ephemeral=True)
     

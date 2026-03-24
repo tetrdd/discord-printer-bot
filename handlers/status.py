@@ -22,10 +22,30 @@ class StatusCog(commands.Cog):
         self._auto_refresh_tasks = {}  # {(channel_id, message_id): asyncio.Task}
     
     @app_commands.command(name="status", description="Get printer status")
-    async def status(self, interaction: discord.Interaction):
+    @app_commands.describe(user="Optional: User to view status of")
+    async def status(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         """Show current printer status."""
-        user_id = interaction.user.id
-        active_printer_id = db.get_active_printer_id(user_id)
+        viewer_id = interaction.user.id
+
+        if user and user.id != viewer_id:
+            # Handle viewing someone else's public printer
+            printers = db.get_printers_by_owner(user.id)
+            # Filter for public ones
+            public_printers = [p for p in printers if p['privacy'] == 'public']
+
+            if not public_printers:
+                await interaction.response.send_message(f"❌ {user.display_name} has no public printers.", ephemeral=True)
+                return
+
+            if len(public_printers) == 1:
+                printer = public_printers[0]
+                await self.show_printer_status(interaction, printer, viewer_id)
+            else:
+                # Let user choose
+                await self.show_public_printer_picker(interaction, user, public_printers)
+            return
+
+        active_printer_id = db.get_active_printer_id(viewer_id)
         
         if active_printer_id is None:
             await interaction.response.send_message("❌ No active printer. Use `/register-printer` or `/switch-printer`.", ephemeral=True)
@@ -36,11 +56,17 @@ class StatusCog(commands.Cog):
             await interaction.response.send_message("❌ Printer not found.", ephemeral=True)
             return
 
+        await self.show_printer_status(interaction, printer, viewer_id)
+
+    async def show_printer_status(self, interaction: discord.Interaction, printer: dict, viewer_id: int):
+        printer_id = printer['printer_id']
+        owner_id = printer['owner_discord_id']
+
         # Permissions check for requesting status
         # Public: anyone can request
         # Private: only owner/allowed
         # Unlisted: only owner/allowed (but result is public)
-        can_request = (printer['privacy'] == 'public') or db.user_can_control(user_id, active_printer_id)
+        can_request = (printer['privacy'] == 'public') or db.user_can_control(viewer_id, printer_id)
         
         if not can_request:
             await interaction.response.send_message("❌ You don't have permission to request status for this printer.", ephemeral=True)
@@ -50,22 +76,59 @@ class StatusCog(commands.Cog):
         # Only 'private' is ephemeral. 'public' and 'unlisted' are shared.
         is_private = printer['privacy'] == 'private'
 
-        await interaction.response.defer(ephemeral=is_private)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=is_private)
         
-        status_data = await api.printer_status(user_id)
-        printer_name = printer['name'] if printer else "Printer"
+        status_data = await api.printer_status(owner_id, printer_id)
+        printer_name = printer['name']
         
         if not status_data:
             await interaction.followup.send(
-                "❌ Could not connect to printer. Is it online?",
+                f"❌ Could not connect to **{printer_name}**. Is it online?",
                 ephemeral=True,
             )
             return
         
         embed = self._build_status_embed(status_data, printer_name)
         
-        view = StatusView(user_id, active_printer_id)
+        view = StatusView(owner_id, printer_id)
         await interaction.followup.send(embed=embed, view=view)
+
+    async def show_public_printer_picker(self, interaction: discord.Interaction, owner: discord.User, public_printers: list):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        embed = discord.Embed(
+            title=f"🖨️ Public Printers - {owner.display_name}",
+            description="Select a printer to view its status:",
+            color=discord.Color.blue()
+        )
+
+        view = discord.ui.View()
+        select = discord.ui.Select(placeholder="Choose a printer...")
+
+        for p in public_printers:
+            # We need to know the state to show it in the picker as requested
+            status = await api.printer_status(owner.id, p['printer_id'])
+            state = "Offline"
+            if status:
+                state = status.get("print_stats", {}).get("state", status.get("state", "Standby")).capitalize()
+
+            select.add_option(
+                label=p['name'],
+                value=str(p['printer_id']),
+                description=f"Status: {state}"
+            )
+
+        async def select_callback(interaction: discord.Interaction):
+            printer_id = int(select.values[0])
+            printer = db.get_printer(printer_id)
+            await self.show_printer_status(interaction, printer, interaction.user.id)
+
+        select.callback = select_callback
+        view.add_item(select)
+
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
     
     @app_commands.command(name="menu", description="Show main menu")
     async def menu(self, interaction: discord.Interaction):
@@ -339,16 +402,16 @@ class StatusView(discord.ui.View):
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Determine printer for this message
-        active_printer = db.get_active_printer(self.user_id)
-        if not active_printer:
+        printer = db.get_printer(self.printer_id)
+        if not printer:
             await interaction.response.send_message("Printer not found.", ephemeral=True)
             return
 
         # Permissions check for refresh
         # Public: anyone can refresh
         # Private/Unlisted: only owner/allowed can refresh
-        can_refresh = (active_printer['privacy'] == 'public') or \
-                      db.user_can_control(interaction.user.id, active_printer['printer_id'])
+        can_refresh = (printer['privacy'] == 'public') or \
+                      db.user_can_control(interaction.user.id, self.printer_id)
 
         if not can_refresh:
             await interaction.response.send_message("❌ You don't have permission to refresh this status.", ephemeral=True)
@@ -356,8 +419,8 @@ class StatusView(discord.ui.View):
 
         await interaction.response.defer()
         
-        status_data = await api.printer_status(self.user_id)
-        printer_name = active_printer['name']
+        status_data = await api.printer_status(self.user_id, self.printer_id)
+        printer_name = printer['name']
         
         if not status_data:
             await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
@@ -370,48 +433,21 @@ class StatusView(discord.ui.View):
     
     @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
     async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from handlers.control import ControlView
-        status_data = await api.printer_status(self.user_id)
-        state = "unknown"
-        if status_data:
-            state = status_data.get("print_stats", {}).get("state", status_data.get("state", "unknown"))
-        embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
-        await interaction.response.edit_message(embed=embed, view=ControlView(self.user_id, state))
+        from handlers.control import ControlCog
+        cog = interaction.client.get_cog("ControlCog")
+        if cog:
+            await cog.show_control(interaction, edit=True, printer_id=self.printer_id)
+        else:
+            await interaction.response.send_message("Control feature not loaded.", ephemeral=True)
     
     @discord.ui.button(label="📷 Snapshot", style=discord.ButtonStyle.secondary)
     async def snapshot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         from handlers.camera import CameraCog
-        import io
         cog = interaction.client.get_cog("CameraCog")
-        if not cog:
+        if cog:
+            await cog.show_camera(interaction, edit=True, printer_id=self.printer_id)
+        else:
             await interaction.response.send_message("Camera feature not loaded.", ephemeral=True)
-            return
-
-        # Determine printer for this message
-        active_printer = db.get_active_printer(self.user_id)
-        if not active_printer:
-            await interaction.response.send_message("Printer not found.", ephemeral=True)
-            return
-
-        # Permissions check
-        can_view = (active_printer['privacy'] in ('public', 'unlisted')) or \
-                   db.user_can_control(interaction.user.id, active_printer['printer_id'])
-
-        if not can_view:
-            await interaction.response.send_message("❌ You don't have permission to view the camera.", ephemeral=True)
-            return
-
-        await interaction.response.defer()
-        snapshot_bytes = await api.snapshot(self.user_id)
-
-        if not snapshot_bytes:
-            await interaction.followup.send("❌ Failed to fetch camera snapshot.", ephemeral=True)
-            return
-
-        file = discord.File(io.BytesIO(snapshot_bytes), filename="snapshot.jpg")
-        embed = discord.Embed(title="📷 Camera Snapshot", description=active_printer['name'], color=0x0099FF)
-        embed.set_image(url="attachment://snapshot.jpg")
-        await interaction.followup.send(file=file, embed=embed, ephemeral=True)
 
     @discord.ui.button(label="⬅️ Back", style=discord.ButtonStyle.secondary)
     async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
