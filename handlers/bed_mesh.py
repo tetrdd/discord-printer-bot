@@ -57,6 +57,7 @@ class BedMeshCog(commands.Cog):
         
         # Build mesh visualization
         mesh_text = self._format_mesh(probed_matrix)
+        mesh_visual = self._visualize_mesh(probed_matrix, min_z, max_z)
         
         embed = discord.Embed(
             title="📊 Bed Mesh Profile",
@@ -71,6 +72,13 @@ class BedMeshCog(commands.Cog):
         embed.add_field(name="📈 Max Z", value=f"{max_z:+.4f}mm", inline=True)
         embed.add_field(name="📊 Range", value=f"{range_z:.4f}mm", inline=True)
         
+        if mesh_visual:
+            embed.add_field(
+                name="🌈 Heatmap",
+                value=mesh_visual,
+                inline=False,
+            )
+
         if mesh_text:
             # Discord has a limit for field length, truncate if needed
             if len(mesh_text) > 1000:
@@ -83,6 +91,28 @@ class BedMeshCog(commands.Cog):
         
         await interaction.followup.send(embed=embed, ephemeral=True)
     
+    def _visualize_mesh(self, matrix: list, min_z: float, max_z: float) -> str:
+        """Visualize mesh using colored squares."""
+        if not matrix:
+            return ""
+
+        z_range = max_z - min_z
+        if z_range == 0:
+            z_range = 1
+
+        emojis = ["🟦", "🟩", "🟨", "🟧", "🟥"]  # low to high
+
+        lines = []
+        for row in matrix:
+            line = ""
+            for val in row:
+                # Map value to 0-4 index
+                idx = int(((val - min_z) / z_range) * (len(emojis) - 1))
+                line += emojis[idx]
+            lines.append(line)
+
+        return "\n".join(lines)
+
     def _format_mesh(self, matrix: list) -> str:
         """Format mesh matrix as text grid."""
         if not matrix:
