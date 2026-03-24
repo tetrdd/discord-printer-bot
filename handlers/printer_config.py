@@ -353,7 +353,7 @@ class UserSettingsView(View):
         self.add_item(
             Button(
                 style=discord.ButtonStyle.primary,
-                label="Edit Settings",
+                label="Edit Profile",
                 custom_id=f"user_settings_edit:{user_id}",
             )
         )
@@ -472,24 +472,29 @@ class PrinterConfigCog(commands.Cog):
         printer_id: int,
     ):
         """View or update printer settings."""
+        await self.show_printer_settings(interaction, printer_id)
+
+    async def show_printer_settings(self, interaction: discord.Interaction, printer_id: int, edit: bool = False):
         user_id = interaction.user.id
         
         # Get printer
         printer = db.get_printer(printer_id)
         
         if not printer:
-            await interaction.response.send_message(
-                f"❌ Printer ID `{printer_id}` not found.",
-                ephemeral=True,
-            )
+            msg = f"❌ Printer ID `{printer_id}` not found."
+            if edit:
+                await interaction.response.edit_message(content=msg, embed=None, view=None)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return
         
         # Check access
         if not db.user_can_view(user_id, printer_id):
-            await interaction.response.send_message(
-                "❌ You don't have permission to view this printer.",
-                ephemeral=True,
-            )
+            msg = "❌ You don't have permission to view this printer."
+            if edit:
+                await interaction.response.edit_message(content=msg, embed=None, view=None)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return
         
         is_owner = db.is_printer_owner(user_id, printer_id)
@@ -502,7 +507,7 @@ class PrinterConfigCog(commands.Cog):
         )
         
         embed.add_field(name="Type", value=printer['type'], inline=True)
-        embed.add_field(name="Privacy", value=printer['privacy'], inline=True)
+        embed.add_field(name="Privacy", value=printer['privacy'].capitalize(), inline=True)
         
         if is_owner:
             embed.add_field(name="URL/Key", value=f"`{printer['url']}`", inline=False)
@@ -526,8 +531,13 @@ class PrinterConfigCog(commands.Cog):
         
         # Add buttons
         view = PrinterActionView(printer_id, is_owner)
+        view.add_item(discord.ui.Button(label="👤 Profile", style=discord.ButtonStyle.secondary, custom_id=f"user_settings_view:{user_id}"))
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
         
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        if edit:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @app_commands.command(
         name="list-printers",

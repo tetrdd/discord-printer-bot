@@ -314,7 +314,11 @@ class MenuView(discord.ui.View):
         from handlers.printer_config import PrinterConfigCog
         cog = interaction.client.get_cog("PrinterConfigCog")
         if cog:
-            await cog.show_my_settings(interaction, edit=True)
+            active_id = db.get_active_printer_id(self.user_id)
+            if active_id:
+                await cog.show_printer_settings(interaction, active_id, edit=True)
+            else:
+                await cog.show_my_settings(interaction, edit=True)
         else:
             await interaction.response.send_message("Settings feature not loaded.", ephemeral=True)
 

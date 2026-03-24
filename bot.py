@@ -61,6 +61,13 @@ class PrinterBot(commands.Bot):
                 printer_id = int(custom_id.split(':')[1])
                 await self.handle_printer_users(interaction, printer_id)
             
+            # Handle user settings view button
+            elif custom_id.startswith('user_settings_view:'):
+                from handlers.printer_config import PrinterConfigCog
+                cog = self.get_cog("PrinterConfigCog")
+                if cog:
+                    await cog.show_my_settings(interaction, edit=True)
+
             # Handle user settings edit button
             elif custom_id.startswith('user_settings_edit:'):
                 user_id = int(custom_id.split(':')[1])
@@ -278,7 +285,13 @@ class PrinterBot(commands.Bot):
             new_privacy = 'public'
 
         if db.update_printer(printer_id, privacy=new_privacy):
-            await interaction.response.send_message(f"✅ Printer privacy set to **{new_privacy.capitalize()}**.", ephemeral=True)
+            # Refresh the settings message to show new state
+            from handlers.printer_config import PrinterConfigCog
+            cog = self.get_cog("PrinterConfigCog")
+            if cog:
+                await cog.show_printer_settings(interaction, printer_id, edit=True)
+            else:
+                await interaction.response.send_message(f"✅ Printer privacy set to **{new_privacy.capitalize()}**.", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Failed to update privacy.", ephemeral=True)
     
