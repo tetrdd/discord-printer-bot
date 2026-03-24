@@ -63,7 +63,6 @@ class BedMeshCog(commands.Cog):
         range_z = max_z - min_z
         
         # Build mesh visualization
-        mesh_text = self._format_mesh(probed_matrix)
         mesh_visual = self._visualize_mesh(probed_matrix, min_z, max_z)
         
         embed = discord.Embed(
@@ -81,18 +80,8 @@ class BedMeshCog(commands.Cog):
         
         if mesh_visual:
             embed.add_field(
-                name="🌈 Heatmap",
+                name="🌈 Bed Mesh Heatmap",
                 value=mesh_visual,
-                inline=False,
-            )
-
-        if mesh_text:
-            # Discord has a limit for field length, truncate if needed
-            if len(mesh_text) > 1000:
-                mesh_text = mesh_text[:997] + "..."
-            embed.add_field(
-                name="🔢 Mesh Values (mm)",
-                value=f"```\n{mesh_text}\n```",
                 inline=False,
             )
         
@@ -124,21 +113,6 @@ class BedMeshCog(commands.Cog):
                 line += emojis[idx]
             lines.append(line)
 
-        return "\n".join(lines)
-
-    def _format_mesh(self, matrix: list) -> str:
-        """Format mesh matrix as text grid."""
-        if not matrix:
-            return ""
-        
-        # Find max width for alignment
-        max_width = max(len(f"{v:+.3f}") for row in matrix for v in row)
-        
-        lines = []
-        for row in matrix:
-            line = " ".join(f"{v:>+{max_width}.3f}" for v in row)
-            lines.append(line)
-        
         return "\n".join(lines)
 
 
