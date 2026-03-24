@@ -139,24 +139,33 @@ class EditTimezoneModal(Modal, title="Edit Timezone"):
         else:
             await interaction.response.send_message("❌ Failed to update timezone.", ephemeral=True)
 
-class EditLanguageModal(Modal, title="Edit Language"):
-    language_input = TextInput(
-        label="Language",
-        placeholder="e.g., en, de, ru",
-        min_length=0,
-        max_length=10,
-        required=False,
-    )
+class LanguageSelectView(View):
+    """View for selecting language."""
 
-    def __init__(self, current_language: str):
-        super().__init__()
-        self.language_input.default = current_language or "en"
+    def __init__(self, user_id: int):
+        super().__init__(timeout=None)
+        self.user_id = user_id
 
-    async def on_submit(self, interaction: discord.Interaction):
-        if db.update_user(interaction.user.id, language=self.language_input.value.strip() or 'en'):
-            await interaction.response.send_message(f"✅ Language updated to **{self.language_input.value}**", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Failed to update language.", ephemeral=True)
+        languages = [
+            ("🇺🇸 English", "en"),
+            ("🇩🇪 German", "de"),
+            ("🇷🇺 Russian", "ru"),
+            ("🇫🇷 French", "fr"),
+            ("🇪🇸 Spanish", "es"),
+        ]
+
+        for label, code in languages:
+            btn = Button(label=label, style=discord.ButtonStyle.secondary, custom_id=f"lang_set:{code}")
+            btn.callback = self.make_callback(code, label)
+            self.add_item(btn)
+
+    def make_callback(self, code: str, label: str):
+        async def callback(interaction: discord.Interaction):
+            if db.update_user(self.user_id, language=code):
+                await interaction.response.send_message(f"✅ Language updated to **{label}**", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Failed to update language.", ephemeral=True)
+        return callback
 
 class EditNotifyChannelModal(Modal, title="Edit Notification Channel"):
     channel_input = TextInput(
@@ -345,7 +354,7 @@ class UserSettingsView(View):
             Button(
                 style=discord.ButtonStyle.primary,
                 label="🗣️ Language",
-                custom_id=f"user_edit_lang:{user_id}",
+                custom_id=f"user_select_lang:{user_id}",
             )
         )
         self.add_item(
@@ -353,6 +362,14 @@ class UserSettingsView(View):
                 style=discord.ButtonStyle.primary,
                 label="🔔 Notifications",
                 custom_id=f"user_edit_notify:{user_id}",
+            )
+        )
+
+        self.add_item(
+            Button(
+                style=discord.ButtonStyle.secondary,
+                label="✉️ Use DMs",
+                custom_id=f"user_set_dm_notify:{user_id}",
             )
         )
 
@@ -437,19 +454,23 @@ class PrinterConfigCog(commands.Cog):
         )
         
         if user_data:
+            tz = user_data.get('timezone')
+            lang = user_data.get('language', 'en')
+            chan = user_data.get('notify_channel')
+
             embed.add_field(
                 name="Timezone",
-                value=f"`{user_data.get('timezone', 'Not set')}`",
+                value=f"`{tz}`" if tz else "*Not set*",
                 inline=True,
             )
             embed.add_field(
                 name="Language",
-                value=f"`{user_data.get('language', 'en')}`",
+                value=f"`{lang}`",
                 inline=True,
             )
             embed.add_field(
-                name="Notify Channel",
-                value=f"`{user_data.get('notify_channel', 'Not set')}`",
+                name="Notifications",
+                value=f"<#{chan}>" if (chan and chan.isdigit()) else (f"`{chan}`" if chan else "*Not set*"),
                 inline=True,
             )
             active_id = user_data.get('active_printer_id')
@@ -547,6 +568,7 @@ class PrinterConfigCog(commands.Cog):
         
         # Add buttons
         view = PrinterActionView(printer_id, is_owner)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
         
         if edit:
             if not interaction.response.is_done():
