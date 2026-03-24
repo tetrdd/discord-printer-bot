@@ -71,12 +71,15 @@ class PrinterBot(commands.Bot):
             elif custom_id.startswith('user_edit_tz:'):
                 user_id = int(custom_id.split(':')[1])
                 await self.handle_user_edit_tz(interaction, user_id)
-            elif custom_id.startswith('user_edit_lang:'):
+            elif custom_id.startswith('user_select_lang:'):
                 user_id = int(custom_id.split(':')[1])
-                await self.handle_user_edit_lang(interaction, user_id)
+                await self.handle_user_select_lang(interaction, user_id)
             elif custom_id.startswith('user_edit_notify:'):
                 user_id = int(custom_id.split(':')[1])
                 await self.handle_user_edit_notify(interaction, user_id)
+            elif custom_id.startswith('user_set_dm_notify:'):
+                user_id = int(custom_id.split(':')[1])
+                await self.handle_user_set_dm_notify(interaction, user_id)
             elif custom_id.startswith('user_manage_printer:'):
                 printer_id = int(custom_id.split(':')[1])
                 from handlers.printer_config import PrinterConfigCog
@@ -251,13 +254,12 @@ class PrinterBot(commands.Bot):
         user_data = db.get_user(user_id)
         await interaction.response.send_modal(EditTimezoneModal(user_data.get('timezone', '') if user_data else ''))
 
-    async def handle_user_edit_lang(self, interaction: discord.Interaction, user_id: int):
-        from handlers.printer_config import EditLanguageModal
+    async def handle_user_select_lang(self, interaction: discord.Interaction, user_id: int):
+        from handlers.printer_config import LanguageSelectView
         if interaction.user.id != user_id:
             await interaction.response.send_message("❌ Not yours.", ephemeral=True)
             return
-        user_data = db.get_user(user_id)
-        await interaction.response.send_modal(EditLanguageModal(user_data.get('language', 'en') if user_data else 'en'))
+        await interaction.response.send_message("Select your language:", view=LanguageSelectView(user_id), ephemeral=True)
 
     async def handle_user_edit_notify(self, interaction: discord.Interaction, user_id: int):
         from handlers.printer_config import EditNotifyChannelModal
@@ -266,6 +268,20 @@ class PrinterBot(commands.Bot):
             return
         user_data = db.get_user(user_id)
         await interaction.response.send_modal(EditNotifyChannelModal(user_data.get('notify_channel', '') if user_data else ''))
+
+    async def handle_user_set_dm_notify(self, interaction: discord.Interaction, user_id: int):
+        if interaction.user.id != user_id:
+            await interaction.response.send_message("❌ Not yours.", ephemeral=True)
+            return
+        if db.update_user(user_id, notify_channel="DM"):
+            from handlers.printer_config import PrinterConfigCog
+            cog = self.get_cog("PrinterConfigCog")
+            if cog:
+                await cog.show_my_settings(interaction, edit=True)
+            else:
+                await interaction.response.send_message("✅ Notifications set to DM.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update.", ephemeral=True)
 
     async def handle_printer_activate(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer activation button click."""

@@ -73,9 +73,23 @@ def init_db():
         if 'stream_url' not in p_columns:
             cursor.execute("ALTER TABLE printers ADD COLUMN stream_url TEXT")
 
-        # Re-check privacy check constraint (migration to unlisted)
-        # SQLite doesn't make it easy to alter check constraints,
-        # so we'll just handle it in code for now.
+        # Migration: Ensure privacy check constraint includes 'unlisted'
+        cursor.execute("PRAGMA table_info(printers)")
+        p_cols = cursor.fetchall()
+        # We can't easily check the CHECK constraint via PRAGMA,
+        # so we'll recreate the table if we detect it's the old schema
+        # (or just always ensure it's correct by running this once)
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='printers'")
+        sql = cursor.fetchone()[0]
+        if "CHECK(privacy IN ('public','private'))" in sql:
+            logger.info("Migrating printers table to support 'unlisted' privacy...")
+            cursor.execute("CREATE TABLE printers_new (printer_id INTEGER PRIMARY KEY AUTOINCREMENT, owner_discord_id INTEGER, name TEXT NOT NULL, type TEXT NOT NULL, url TEXT NOT NULL, api_key TEXT, privacy TEXT CHECK(privacy IN ('public','private','unlisted')), creation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, camera_url TEXT, stream_url TEXT, FOREIGN KEY (owner_discord_id) REFERENCES users(discord_id))")
+            cursor.execute("INSERT INTO printers_new SELECT * FROM printers")
+            cursor.execute("DROP TABLE printers")
+            cursor.execute("ALTER TABLE printers_new RENAME TO printers")
+            # Re-create index
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_printers_owner ON printers(owner_discord_id)")
+            conn.commit()
 
         # Printer allowed users table
         cursor.execute('''
