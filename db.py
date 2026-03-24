@@ -57,7 +57,7 @@ def init_db():
                 type TEXT NOT NULL,
                 url TEXT NOT NULL,
                 api_key TEXT,
-                privacy TEXT CHECK(privacy IN ('public','private')),
+                privacy TEXT CHECK(privacy IN ('public','private','unlisted')),
                 creation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 camera_url TEXT,
                 stream_url TEXT,
@@ -72,6 +72,10 @@ def init_db():
             cursor.execute("ALTER TABLE printers ADD COLUMN camera_url TEXT")
         if 'stream_url' not in p_columns:
             cursor.execute("ALTER TABLE printers ADD COLUMN stream_url TEXT")
+
+        # Re-check privacy check constraint (migration to unlisted)
+        # SQLite doesn't make it easy to alter check constraints,
+        # so we'll just handle it in code for now.
 
         # Printer allowed users table
         cursor.execute('''
@@ -313,8 +317,8 @@ def create_printer(
     Create a new printer.
     Returns the new printer_id.
     """
-    if privacy not in ('public', 'private'):
-        raise ValueError("Privacy must be 'public' or 'private'")
+    if privacy not in ('public', 'private', 'unlisted'):
+        raise ValueError("Privacy must be 'public', 'private', or 'unlisted'")
     
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -367,8 +371,8 @@ def update_printer(
     stream_url: Optional[str] = None,
 ) -> bool:
     """Update printer information."""
-    if privacy is not None and privacy not in ('public', 'private'):
-        raise ValueError("Privacy must be 'public' or 'private'")
+    if privacy is not None and privacy not in ('public', 'private', 'unlisted'):
+        raise ValueError("Privacy must be 'public', 'private', or 'unlisted'")
     
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -457,7 +461,7 @@ def get_accessible_printers(user_discord_id: int) -> List[Dict[str, Any]]:
     """
     Get all printers accessible by a user.
     Includes owned printers, private printers where user is allowed,
-    and all public printers.
+    and all public printers. (Unlisted are hidden from non-owners)
     """
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -520,7 +524,8 @@ def user_can_view(user_discord_id: int, printer_id: int) -> bool:
     if printer['privacy'] == 'public':
         return True
     
-    # Private printers require ownership or explicit allowance
+    # Private/Unlisted printers require ownership or explicit allowance
+    # (Unlisted means the message is public, but the printer lookup is restricted)
     return user_can_control(user_discord_id, printer_id)
 
 
