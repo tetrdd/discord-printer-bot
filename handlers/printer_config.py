@@ -333,6 +333,16 @@ class PrinterActionView(View):
             )
         )
 
+        # Toggle Privacy
+        if is_owner:
+            self.add_item(
+                Button(
+                    style=discord.ButtonStyle.secondary,
+                    label="Toggle Privacy",
+                    custom_id=f"printer_privacy_toggle:{printer_id}",
+                )
+            )
+
 
 class UserSettingsView(View):
     """View with buttons for user settings."""

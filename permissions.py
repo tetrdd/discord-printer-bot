@@ -40,7 +40,7 @@ def check_control_permission(user_id: int, printer_id: Optional[int]) -> bool:
     if not db.user_can_control(user_id, printer_id):
         printer = db.get_printer(printer_id)
         printer_name = printer.get("name", f"Printer {printer_id}") if printer else "Unknown"
-        raise PermissionError(f"You don't have permission to control {printer_name}")
+        raise PermissionError(f"You don't have permission to control {printer_name}. Only the owner can do this.")
     return True
 
 
