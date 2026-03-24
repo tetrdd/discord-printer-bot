@@ -70,6 +70,13 @@ class PrinterBot(commands.Bot):
             elif custom_id.startswith('printer_activate:'):
                 printer_id = int(custom_id.split(':')[1])
                 await self.handle_printer_activate(interaction, printer_id)
+
+            # Handle back to menu button
+            elif custom_id == "back_to_menu":
+                from handlers.status import StatusCog
+                cog = self.get_cog("StatusCog")
+                if cog:
+                    await cog.menu.callback(cog, interaction)
     
     async def handle_printer_edit(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer edit button click."""
