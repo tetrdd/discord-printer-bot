@@ -25,16 +25,25 @@ class HistoryCog(commands.Cog):
     @app_commands.describe(page="Page number (default: 1)")
     async def history(self, interaction: discord.Interaction, page: Optional[int] = 1):
         """View print history."""
+        await self.show_history(interaction, page)
+
+    async def show_history(self, interaction: discord.Interaction, page: int = 1, edit: bool = False):
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
         
         try:
             permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        await interaction.response.defer()
+        if edit:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True)
         
         history = await api.print_history(limit=50, user_id=user_id)
         
@@ -95,7 +104,12 @@ class HistoryCog(commands.Cog):
             )
         
         view = HistoryView(user_id, page, total_pages)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+        if edit:
+            await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed, view=view)
     
     def _format_duration(self, seconds: float) -> str:
         """Format duration in seconds to human readable string."""

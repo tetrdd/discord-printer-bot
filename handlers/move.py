@@ -22,13 +22,19 @@ class MoveCog(commands.Cog):
     @app_commands.command(name="move", description="Show movement controls")
     async def move(self, interaction: discord.Interaction):
         """Show movement control menu."""
+        await self.show_move(interaction)
+
+    async def show_move(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
 
         try:
             permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -38,7 +44,12 @@ class MoveCog(commands.Cog):
         )
 
         view = MoveView(user_id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+        if edit:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class MoveView(discord.ui.View):

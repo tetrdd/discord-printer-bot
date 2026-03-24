@@ -22,13 +22,19 @@ class TempsCog(commands.Cog):
     @app_commands.command(name="temperatures", description="Temperature control menu")
     async def temperatures(self, interaction: discord.Interaction):
         """Show temperature control menu."""
+        await self.show_temps(interaction)
+
+    async def show_temps(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
         
         try:
             permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
         status_data = await api.printer_status(user_id)
@@ -67,7 +73,15 @@ class TempsCog(commands.Cog):
         )
         
         view = TempsView(user_id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+        if edit:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=view)
+            else:
+                await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @app_commands.command(name="presets-manager", description="Manage your temperature presets")
     async def presets_manager(self, interaction: discord.Interaction):

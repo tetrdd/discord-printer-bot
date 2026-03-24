@@ -403,6 +403,9 @@ class PrinterConfigCog(commands.Cog):
     @app_commands.command(name="my-settings", description="View or update your personal settings")
     async def my_settings(self, interaction: discord.Interaction):
         """View or update personal user settings."""
+        await self.show_my_settings(interaction)
+
+    async def show_my_settings(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         
         # Ensure user exists
@@ -441,8 +444,12 @@ class PrinterConfigCog(commands.Cog):
             embed.description = "No settings configured yet. Click the button below to set them up!"
         
         view = UserSettingsView(user_id)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
         
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        if edit:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @app_commands.command(
         name="printer-settings",

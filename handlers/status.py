@@ -239,55 +239,55 @@ class MenuView(discord.ui.View):
     
     @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary, row=0)
     async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from handlers.control import ControlView
-        status_data = await api.printer_status(self.user_id)
-        state = "unknown"
-        if status_data:
-            state = status_data.get("print_stats", {}).get("state", status_data.get("state", "unknown"))
-        embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
-        view = ControlView(self.user_id, state)
-        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.edit_message(embed=embed, view=view)
+        from handlers.control import ControlCog
+        cog = interaction.client.get_cog("ControlCog")
+        if cog:
+            await cog.show_control(interaction, edit=True)
+        else:
+            await interaction.response.send_message("Control feature not loaded.", ephemeral=True)
     
     @discord.ui.button(label="🌡️ Temps", style=discord.ButtonStyle.secondary, row=0)
     async def temps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from handlers.temps import TempsView
-        embed = discord.Embed(title="🌡️ Temperature Control", color=0xFF6600)
-        view = TempsView(self.user_id)
-        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.edit_message(embed=embed, view=view)
+        from handlers.temps import TempsCog
+        cog = interaction.client.get_cog("TempsCog")
+        if cog:
+            await cog.show_temps(interaction, edit=True)
+        else:
+            await interaction.response.send_message("Temps feature not loaded.", ephemeral=True)
     
     @discord.ui.button(label="📁 Files", style=discord.ButtonStyle.secondary, row=1)
     async def files_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         from handlers.files import FilesCog
         cog = interaction.client.get_cog("FilesCog")
         if cog:
-            await cog.files.callback(cog, interaction)
+            await cog.show_files(interaction, edit=True)
         else:
             await interaction.response.send_message("Files feature not loaded.", ephemeral=True)
 
     @discord.ui.button(label="🎮 Move", style=discord.ButtonStyle.secondary, row=1)
     async def move_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from handlers.move import MoveView
-        embed = discord.Embed(title="🎮 Movement Control", description="Step size: **10mm**", color=0x2ECC71)
-        view = MoveView(self.user_id)
-        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.edit_message(embed=embed, view=view)
+        from handlers.move import MoveCog
+        cog = interaction.client.get_cog("MoveCog")
+        if cog:
+            await cog.show_move(interaction, edit=True)
+        else:
+            await interaction.response.send_message("Move feature not loaded.", ephemeral=True)
 
     @discord.ui.button(label="🧵 Filament", style=discord.ButtonStyle.secondary, row=1)
     async def filament_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from handlers.filament import FilamentView
-        embed = discord.Embed(title="🧵 Filament Management", description="Quick load/unload", color=0xE67E22)
-        view = FilamentView(self.user_id)
-        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.edit_message(embed=embed, view=view)
+        from handlers.filament import FilamentCog
+        cog = interaction.client.get_cog("FilamentCog")
+        if cog:
+            await cog.show_filament(interaction, edit=True)
+        else:
+            await interaction.response.send_message("Filament feature not loaded.", ephemeral=True)
     
     @discord.ui.button(label="📷 Camera", style=discord.ButtonStyle.secondary, row=2)
     async def camera_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         from handlers.camera import CameraCog
         cog = interaction.client.get_cog("CameraCog")
         if cog:
-            await cog.camera.callback(cog, interaction)
+            await cog.show_camera(interaction, edit=True)
         else:
             await interaction.response.send_message("Camera feature not loaded.", ephemeral=True)
 
@@ -296,7 +296,7 @@ class MenuView(discord.ui.View):
         from handlers.history import HistoryCog
         cog = interaction.client.get_cog("HistoryCog")
         if cog:
-            await cog.history.callback(cog, interaction)
+            await cog.show_history(interaction, edit=True)
         else:
             await interaction.response.send_message("History feature not loaded.", ephemeral=True)
 
@@ -305,7 +305,7 @@ class MenuView(discord.ui.View):
         from handlers.bed_mesh import BedMeshCog
         cog = interaction.client.get_cog("BedMeshCog")
         if cog:
-            await cog.bed_mesh.callback(cog, interaction)
+            await cog.show_bed_mesh(interaction, edit=True)
         else:
             await interaction.response.send_message("Bed Mesh feature not loaded.", ephemeral=True)
 
@@ -314,7 +314,7 @@ class MenuView(discord.ui.View):
         from handlers.printer_config import PrinterConfigCog
         cog = interaction.client.get_cog("PrinterConfigCog")
         if cog:
-            await cog.my_settings.callback(cog, interaction)
+            await cog.show_my_settings(interaction, edit=True)
         else:
             await interaction.response.send_message("Settings feature not loaded.", ephemeral=True)
 
@@ -323,7 +323,7 @@ class MenuView(discord.ui.View):
         from handlers.printers import PrintersCog
         cog = interaction.client.get_cog("PrintersCog")
         if cog:
-            await cog.printers.callback(cog, interaction)
+            await cog.show_printers(interaction, edit=True)
         else:
             await interaction.response.send_message("Printers feature not loaded.", ephemeral=True)
 
@@ -412,6 +412,12 @@ class StatusView(discord.ui.View):
         embed = discord.Embed(title="📷 Camera Snapshot", description=active_printer['name'], color=0x0099FF)
         embed.set_image(url="attachment://snapshot.jpg")
         await interaction.followup.send(file=file, embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="⬅️ Back", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("StatusCog")
+        if cog:
+            await cog.show_main_menu(interaction, edit=True)
 
     @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
     async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
