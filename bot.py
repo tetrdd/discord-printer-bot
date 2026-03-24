@@ -76,7 +76,7 @@ class PrinterBot(commands.Bot):
                 from handlers.status import StatusCog
                 cog = self.get_cog("StatusCog")
                 if cog:
-                    await cog.menu.callback(cog, interaction)
+                    await cog.show_main_menu(interaction, edit=True)
     
     async def handle_printer_edit(self, interaction: discord.Interaction, printer_id: int):
         """Handle printer edit button click."""

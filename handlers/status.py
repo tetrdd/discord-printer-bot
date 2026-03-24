@@ -70,16 +70,14 @@ class StatusCog(commands.Cog):
     @app_commands.command(name="menu", description="Show main menu")
     async def menu(self, interaction: discord.Interaction):
         """Show the main menu."""
+        await self.show_main_menu(interaction)
+
+    async def show_main_menu(self, interaction: discord.Interaction, edit: bool = False):
+        """Helper to show or edit the main menu."""
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
         
-        try:
-            permissions.check_view_permission(user_id, active_printer_id)
-        except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        
-        # Menu is personal, always ephemeral
+        # Determine printer info
         active_printer = db.get_active_printer(user_id)
         printer_name = active_printer['name'] if active_printer else "Printer"
         
@@ -90,7 +88,11 @@ class StatusCog(commands.Cog):
         )
         
         view = MenuView(user_id, active_printer_id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+        if edit:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     def _build_status_embed(self, status: dict, printer_name: str) -> discord.Embed:
         """Build a status embed from printer data."""
@@ -230,7 +232,8 @@ class MenuView(discord.ui.View):
             cog = interaction.client.get_cog("StatusCog")
             embed = cog._build_status_embed(status_data, printer_name)
             view = StatusView(self.user_id, self.printer_id)
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            # Edit the existing message instead of sending a new one
+            await interaction.edit_original_response(embed=embed, view=view)
         else:
             await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
     
@@ -244,7 +247,7 @@ class MenuView(discord.ui.View):
         embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
         view = ControlView(self.user_id, state)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.edit_message(embed=embed, view=view)
     
     @discord.ui.button(label="🌡️ Temps", style=discord.ButtonStyle.secondary, row=0)
     async def temps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -252,7 +255,7 @@ class MenuView(discord.ui.View):
         embed = discord.Embed(title="🌡️ Temperature Control", color=0xFF6600)
         view = TempsView(self.user_id)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.edit_message(embed=embed, view=view)
     
     @discord.ui.button(label="📁 Files", style=discord.ButtonStyle.secondary, row=1)
     async def files_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -269,7 +272,7 @@ class MenuView(discord.ui.View):
         embed = discord.Embed(title="🎮 Movement Control", description="Step size: **10mm**", color=0x2ECC71)
         view = MoveView(self.user_id)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="🧵 Filament", style=discord.ButtonStyle.secondary, row=1)
     async def filament_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -277,7 +280,7 @@ class MenuView(discord.ui.View):
         embed = discord.Embed(title="🧵 Filament Management", description="Quick load/unload", color=0xE67E22)
         view = FilamentView(self.user_id)
         view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.edit_message(embed=embed, view=view)
     
     @discord.ui.button(label="📷 Camera", style=discord.ButtonStyle.secondary, row=2)
     async def camera_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -373,7 +376,7 @@ class StatusView(discord.ui.View):
         if status_data:
             state = status_data.get("print_stats", {}).get("state", status_data.get("state", "unknown"))
         embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
-        await interaction.response.send_message(embed=embed, view=ControlView(self.user_id, state), ephemeral=True)
+        await interaction.response.edit_message(embed=embed, view=ControlView(self.user_id, state))
     
     @discord.ui.button(label="📷 Snapshot", style=discord.ButtonStyle.secondary)
     async def snapshot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
