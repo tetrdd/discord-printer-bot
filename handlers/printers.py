@@ -35,8 +35,8 @@ class PrintersCog(commands.Cog):
         printers = db.get_accessible_printers(user_id)
         if printers:
             embed = discord.Embed(
-                title="🖨️ Your Printers",
-                description=f"You have access to **{len(printers)}** printer(s).",
+                title="🖨️ Printer Directory",
+                description=f"Showing **{len(printers)}** printer(s) you can access.",
                 color=discord.Color.green(),
             )
 
@@ -59,6 +59,32 @@ class PrintersCog(commands.Cog):
                 )
 
             view = discord.ui.View(timeout=None)
+
+            # Add Select Menu to switch printer
+            select = discord.ui.Select(placeholder="Select a printer to control...")
+            for p in printers:
+                label = p['name']
+                if p['printer_id'] == active_id:
+                    label += " (Active)"
+                select.add_option(
+                    label=label,
+                    value=str(p['printer_id']),
+                    description=f"ID: {p['printer_id']} • {p['type']}"
+                )
+
+            async def select_callback(interaction: discord.Interaction):
+                pid = int(select.values[0])
+                if db.set_active_printer(interaction.user.id, pid):
+                    printer = db.get_printer(pid)
+                    await interaction.response.send_message(f"✅ Now controlling **{printer['name']}**.", ephemeral=True)
+                    # Refresh the list
+                    await self.show_printers(interaction, edit=True)
+                else:
+                    await interaction.response.send_message("❌ Failed to switch printer.", ephemeral=True)
+
+            select.callback = select_callback
+            view.add_item(select)
+
             view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
 
             if edit:
