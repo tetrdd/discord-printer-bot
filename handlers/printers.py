@@ -20,23 +20,35 @@ class PrintersCog(commands.Cog):
         self.bot = bot
     
     @app_commands.command(name="printers", description="List accessible printers")
-    async def printers(self, interaction: discord.Interaction):
+    @app_commands.describe(owner="Optional: Filter by a specific owner")
+    async def printers(self, interaction: discord.Interaction, owner: Optional[discord.User] = None):
         """List all printers you have access to."""
-        await self.show_printers(interaction)
+        await self.show_printers(interaction, owner_filter=owner)
 
-    async def show_printers(self, interaction: discord.Interaction, edit: bool = False):
+    async def show_printers(self, interaction: discord.Interaction, edit: bool = False, owner_filter: discord.User = None):
         user_id = interaction.user.id
         
         if edit:
-            await interaction.response.defer()
+            # Check if interaction already responded (from buttons)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
         else:
             await interaction.response.defer(ephemeral=True)
 
         printers = db.get_accessible_printers(user_id)
+
+        # Filter by owner if requested
+        if owner_filter:
+            printers = [p for p in printers if p['owner_discord_id'] == owner_filter.id]
+            if not printers:
+                await interaction.followup.send(f"❌ No accessible printers found for **{owner_filter.display_name}**.", ephemeral=True)
+                return
+
         if printers:
+            owner_text = f" owned by **{owner_filter.display_name}**" if owner_filter else ""
             embed = discord.Embed(
                 title="🖨️ Printer Directory",
-                description=f"Showing **{len(printers)}** printer(s) you can access.",
+                description=f"Showing **{len(printers)}** printer(s) you can access{owner_text}.",
                 color=discord.Color.green(),
             )
 
