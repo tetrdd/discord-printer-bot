@@ -33,11 +33,14 @@ class StatusCog(commands.Cog):
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        await interaction.response.defer()
+        # Determine if message should be ephemeral
+        printer = db.get_printer(active_printer_id)
+        is_private = printer['privacy'] == 'private' if printer else True
+
+        await interaction.response.defer(ephemeral=is_private)
         
         status_data = await api.printer_status(user_id)
-        active_printer = db.get_active_printer(user_id)
-        printer_name = active_printer['name'] if active_printer else "Printer"
+        printer_name = printer['name'] if printer else "Printer"
         
         if not status_data:
             await interaction.followup.send(
@@ -48,7 +51,7 @@ class StatusCog(commands.Cog):
         
         embed = self._build_status_embed(status_data, printer_name)
         
-        view = StatusView(user_id, self._auto_refresh_tasks)
+        view = StatusView(user_id, active_printer_id)
         await interaction.followup.send(embed=embed, view=view)
     
     @app_commands.command(name="menu", description="Show main menu")
@@ -63,6 +66,7 @@ class StatusCog(commands.Cog):
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
+        # Menu is personal, always ephemeral
         active_printer = db.get_active_printer(user_id)
         printer_name = active_printer['name'] if active_printer else "Printer"
         
@@ -72,7 +76,7 @@ class StatusCog(commands.Cog):
             color=0x0099FF,
         )
         
-        view = MenuView(user_id)
+        view = MenuView(user_id, active_printer_id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     def _build_status_embed(self, status: dict, printer_name: str) -> discord.Embed:
@@ -198,21 +202,40 @@ class StatusCog(commands.Cog):
 class MenuView(discord.ui.View):
     """Main menu view with buttons."""
     
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, printer_id: int):
         super().__init__(timeout=None)
         self.user_id = user_id
+        self.printer_id = printer_id
     
     @discord.ui.button(label="📊 Status", style=discord.ButtonStyle.primary)
     async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/status` to see printer status.", ephemeral=True)
+        await interaction.response.defer()
+        status_data = await api.printer_status(self.user_id)
+        active_printer = db.get_active_printer(self.user_id)
+        printer_name = active_printer['name'] if active_printer else "Printer"
+        if status_data:
+            cog = interaction.client.get_cog("StatusCog")
+            embed = cog._build_status_embed(status_data, printer_name)
+            view = StatusView(self.user_id, self.printer_id)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
     
     @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
     async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/control` for print controls.", ephemeral=True)
+        from handlers.control import ControlView
+        status_data = await api.printer_status(self.user_id)
+        state = "unknown"
+        if status_data:
+            state = status_data.get("print_stats", {}).get("state", status_data.get("state", "unknown"))
+        embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
+        await interaction.response.send_message(embed=embed, view=ControlView(self.user_id, state), ephemeral=True)
     
     @discord.ui.button(label="🌡️ Temperatures", style=discord.ButtonStyle.secondary)
     async def temps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/temperatures` to control temps.", ephemeral=True)
+        from handlers.temps import TempsView
+        embed = discord.Embed(title="🌡️ Temperature Control", color=0xFF6600)
+        await interaction.response.send_message(embed=embed, view=TempsView(self.user_id), ephemeral=True)
     
     @discord.ui.button(label="📁 Files", style=discord.ButtonStyle.secondary)
     async def files_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -220,16 +243,21 @@ class MenuView(discord.ui.View):
     
     @discord.ui.button(label="📷 Camera", style=discord.ButtonStyle.secondary)
     async def camera_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/camera` for snapshots.", ephemeral=True)
+        from handlers.camera import CameraCog
+        cog = interaction.client.get_cog("CameraCog")
+        if cog:
+            await cog.camera.callback(cog, interaction)
+        else:
+            await interaction.response.send_message("Camera feature not loaded.", ephemeral=True)
 
 
 class StatusView(discord.ui.View):
     """Status view with action buttons."""
     
-    def __init__(self, user_id: int, auto_refresh_tasks: dict):
+    def __init__(self, user_id: int, printer_id: int):
         super().__init__(timeout=None)
         self.user_id = user_id
-        self.auto_refresh_tasks = auto_refresh_tasks
+        self.printer_id = printer_id
     
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -250,15 +278,32 @@ class StatusView(discord.ui.View):
     
     @discord.ui.button(label="🎮 Control", style=discord.ButtonStyle.secondary)
     async def control_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/control` for print controls.", ephemeral=True)
-    
-    @discord.ui.button(label="🔧 Adjust", style=discord.ButtonStyle.secondary)
-    async def adjust_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/adjust` for speed/flow/fan adjustments.", ephemeral=True)
+        from handlers.control import ControlView
+        status_data = await api.printer_status(self.user_id)
+        state = "unknown"
+        if status_data:
+            state = status_data.get("print_stats", {}).get("state", status_data.get("state", "unknown"))
+        embed = discord.Embed(title="🎮 Print Control", description=f"State: **{state}**", color=0x0099FF)
+        await interaction.response.send_message(embed=embed, view=ControlView(self.user_id, state), ephemeral=True)
     
     @discord.ui.button(label="📷 Snapshot", style=discord.ButtonStyle.secondary)
     async def snapshot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("Use `/camera` for snapshots.", ephemeral=True)
+        from handlers.camera import CameraCog
+        cog = interaction.client.get_cog("CameraCog")
+        if cog:
+            # We can't easily call the command directly with full logic here due to defer issues,
+            # but we can try a simple follow-up.
+            await cog.camera.callback(cog, interaction)
+        else:
+            await interaction.response.send_message("Camera feature not loaded.", ephemeral=True)
+
+    @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only owner can delete
+        if db.is_printer_owner(interaction.user.id, self.printer_id):
+            await interaction.message.delete()
+        else:
+            await interaction.response.send_message("❌ Only the printer owner can delete this message.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
