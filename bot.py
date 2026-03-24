@@ -256,6 +256,8 @@ class PrinterBot(commands.Bot):
             "handlers.adjust",
             "handlers.history",
             "handlers.bed_mesh",
+            "handlers.move",
+            "handlers.filament",
             "handlers.printers",
             "handlers.printer_config",
         ]

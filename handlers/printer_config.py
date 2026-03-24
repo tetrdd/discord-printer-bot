@@ -58,8 +58,8 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
         self.add_item(self.stream_input)
         
         self.privacy_select = TextInput(
-            label="Privacy (public/private)",
-            placeholder="public or private",
+            label="Privacy (public/private/unlisted)",
+            placeholder="public, private, or unlisted",
             min_length=1,
             max_length=10,
             required=True,
@@ -76,9 +76,9 @@ class RegisterPrinterModal(Modal, title="Register New Printer"):
         
         # Validate privacy
         privacy = self.privacy_select.value.lower().strip()
-        if privacy not in ('public', 'private'):
+        if privacy not in ('public', 'private', 'unlisted'):
             await interaction.response.send_message(
-                "❌ Invalid privacy setting. Must be `public` or `private`.",
+                "❌ Invalid privacy setting. Must be `public`, `private`, or `unlisted`.",
                 ephemeral=True,
             )
             return
@@ -233,7 +233,7 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
         
         privacy = printer_data.get('privacy', 'public')
         self.privacy_input = TextInput(
-            label="Privacy (public/private)",
+            label="Privacy (public/private/unlisted)",
             min_length=1,
             max_length=10,
             required=True,
@@ -247,9 +247,9 @@ class PrinterSettingsModal(Modal, title="Update Printer Settings"):
         
         # Validate privacy
         privacy = self.privacy_input.value.lower().strip()
-        if privacy not in ('public', 'private'):
+        if privacy not in ('public', 'private', 'unlisted'):
             await interaction.response.send_message(
-                "❌ Invalid privacy setting. Must be `public` or `private`.",
+                "❌ Invalid privacy setting. Must be `public`, `private`, or `unlisted`.",
                 ephemeral=True,
             )
             return
