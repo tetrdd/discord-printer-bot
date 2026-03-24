@@ -22,8 +22,16 @@ class PrintersCog(commands.Cog):
     @app_commands.command(name="printers", description="List accessible printers")
     async def printers(self, interaction: discord.Interaction):
         """List all printers you have access to."""
+        await self.show_printers(interaction)
+
+    async def show_printers(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         
+        if edit:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True)
+
         printers = db.get_accessible_printers(user_id)
         if printers:
             embed = discord.Embed(
@@ -50,9 +58,15 @@ class PrintersCog(commands.Cog):
                     inline=False,
                 )
 
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            view = discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+            if edit:
+                await interaction.edit_original_response(embed=embed, view=view)
+            else:
+                await interaction.followup.send(embed=embed, view=view)
         else:
-            await interaction.response.send_message("You don't have access to any printers. Use `/register-printer` to add one!", ephemeral=True)
+            await interaction.followup.send("You don't have access to any printers. Use `/register-printer` to add one!", ephemeral=True)
     
     @app_commands.command(name="switch-printer", description="Switch to a different printer")
     @app_commands.describe(printer_id="Printer ID to switch to")

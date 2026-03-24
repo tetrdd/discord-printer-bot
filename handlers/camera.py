@@ -22,16 +22,25 @@ class CameraCog(commands.Cog):
     @app_commands.command(name="camera", description="Take a camera snapshot")
     async def camera(self, interaction: discord.Interaction):
         """Take and display a camera snapshot."""
+        await self.show_camera(interaction)
+
+    async def show_camera(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
         
         try:
             permissions.check_view_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        await interaction.response.defer()
+        if edit:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True)
         
         # Get snapshot
         snapshot_bytes = await api.snapshot(user_id)
@@ -62,7 +71,13 @@ class CameraCog(commands.Cog):
         if stream_url:
             embed.add_field(name="📺 Live Stream", value=f"[Click here]({stream_url})", inline=False)
         
-        await interaction.followup.send(file=file, embed=embed)
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+        if edit:
+            await interaction.edit_original_response(file=file, embed=embed, view=view)
+        else:
+            await interaction.followup.send(file=file, embed=embed, view=view)
     
     @app_commands.command(name="stream", description="Get camera stream link")
     async def stream(self, interaction: discord.Interaction):

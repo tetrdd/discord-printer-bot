@@ -21,24 +21,31 @@ class BedMeshCog(commands.Cog):
     @app_commands.command(name="bed-mesh", description="View bed mesh profile")
     async def bed_mesh(self, interaction: discord.Interaction):
         """View bed mesh profile data."""
+        await self.show_bed_mesh(interaction)
+
+    async def show_bed_mesh(self, interaction: discord.Interaction, edit: bool = False):
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
         
         try:
             permissions.check_control_permission(user_id, active_printer_id)
         except permissions.PermissionError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         
-        await interaction.response.defer()
+        if edit:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True)
         
         mesh_data = await api.bed_mesh_status(user_id)
         
         if not mesh_data:
-            await interaction.followup.send(
-                "📊 Bed mesh data not available. (Note: Only available on Moonraker/Klipper with bed_mesh configured)",
-                ephemeral=True,
-            )
+            msg = "📊 Bed mesh data not available. (Note: Only available on Moonraker/Klipper with bed_mesh configured)"
+            await interaction.followup.send(msg, ephemeral=True)
             return
         
         profile_name = mesh_data.get("profile_name", "default")
@@ -89,7 +96,13 @@ class BedMeshCog(commands.Cog):
                 inline=False,
             )
         
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
+
+        if edit:
+            await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed, view=view)
     
     def _visualize_mesh(self, matrix: list, min_z: float, max_z: float) -> str:
         """Visualize mesh using colored squares."""
