@@ -71,6 +71,11 @@ class PrinterBot(commands.Bot):
                 printer_id = int(custom_id.split(':')[1])
                 await self.handle_printer_activate(interaction, printer_id)
 
+            # Handle printer privacy toggle button
+            elif custom_id.startswith('printer_privacy_toggle:'):
+                printer_id = int(custom_id.split(':')[1])
+                await self.handle_printer_privacy_toggle(interaction, printer_id)
+
             # Handle back to menu button
             elif custom_id == "back_to_menu":
                 from handlers.status import StatusCog
@@ -249,6 +254,33 @@ class PrinterBot(commands.Bot):
                 "❌ Failed to set active printer. Do you have access?",
                 ephemeral=True,
             )
+
+    async def handle_printer_privacy_toggle(self, interaction: discord.Interaction, printer_id: int):
+        """Handle printer privacy toggle button click."""
+        user_id = interaction.user.id
+
+        if not db.is_printer_owner(user_id, printer_id):
+            await interaction.response.send_message("❌ Only the owner can change privacy settings.", ephemeral=True)
+            return
+
+        printer = db.get_printer(printer_id)
+        if not printer:
+            await interaction.response.send_message("❌ Printer not found.", ephemeral=True)
+            return
+
+        # Toggle: public -> private -> unlisted -> public
+        current = printer['privacy']
+        if current == 'public':
+            new_privacy = 'private'
+        elif current == 'private':
+            new_privacy = 'unlisted'
+        else:
+            new_privacy = 'public'
+
+        if db.update_printer(printer_id, privacy=new_privacy):
+            await interaction.response.send_message(f"✅ Printer privacy set to **{new_privacy.capitalize()}**.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Failed to update privacy.", ephemeral=True)
     
     async def setup_hook(self):
         """Load cogs on startup."""
