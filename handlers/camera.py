@@ -141,7 +141,7 @@ class CameraCog(commands.Cog):
 
         # If printer is private or unlisted, show warning confirmation view ephemerally
         if printer['privacy'] in ('private', 'unlisted'):
-            view = PubCameraConfirmView(owner_id, printer, self)
+            view = PubCameraConfirmView(owner_id, printer, self, caller_id=viewer_id)
             await interaction.response.send_message(
                 f"⚠️ **Warning: Your printer privacy is set to `{printer['privacy']}`. Do you really want to send a public camera snapshot?**",
                 view=view,
@@ -168,28 +168,19 @@ class CameraCog(commands.Cog):
             if stream_url:
                 embed.add_field(name="📺 Live Stream", value=f"[Click here]({stream_url})", inline=False)
 
-            class PubCameraDeleteView(discord.ui.View):
-                def __init__(self, printer_id: int):
-                    super().__init__(timeout=None)
-                    self.printer_id = printer_id
-                @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
-                async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if db.is_printer_owner(interaction.user.id, self.printer_id):
-                        await interaction.message.delete()
-                    else:
-                        await interaction.response.send_message("❌ Only the printer owner can delete this message.", ephemeral=True)
-
-            await interaction.followup.send(file=file, embed=embed, view=PubCameraDeleteView(active_printer_id))
+            view = PubCameraDeleteView(active_printer_id, caller_id=viewer_id)
+            await interaction.followup.send(file=file, embed=embed, view=view)
 
 
 class PubCameraConfirmView(discord.ui.View):
     """Confirmation view for opening a public camera snapshot."""
 
-    def __init__(self, owner_id: int, printer: dict, camera_cog: CameraCog):
+    def __init__(self, owner_id: int, printer: dict, camera_cog: CameraCog, caller_id: int):
         super().__init__(timeout=60)
         self.owner_id = owner_id
         self.printer = printer
         self.camera_cog = camera_cog
+        self.caller_id = caller_id
 
     @discord.ui.button(label="Yes, send publicly", style=discord.ButtonStyle.success)
     async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -216,18 +207,8 @@ class PubCameraConfirmView(discord.ui.View):
         if stream_url:
             embed.add_field(name="📺 Live Stream", value=f"[Click here]({stream_url})", inline=False)
 
-        class PubCameraDeleteView(discord.ui.View):
-            def __init__(self, printer_id: int):
-                super().__init__(timeout=None)
-                self.printer_id = printer_id
-            @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
-            async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if db.is_printer_owner(interaction.user.id, self.printer_id):
-                    await interaction.message.delete()
-                else:
-                    await interaction.response.send_message("❌ Only the printer owner can delete this message.", ephemeral=True)
-
-        await interaction.channel.send(file=file, embed=embed, view=PubCameraDeleteView(printer_id))
+        view = PubCameraDeleteView(printer_id, caller_id=self.caller_id)
+        await interaction.channel.send(file=file, embed=embed, view=view)
         await interaction.edit_original_response(content="✅ Public camera snapshot sent below.", view=None)
         self.stop()
 
@@ -235,6 +216,23 @@ class PubCameraConfirmView(discord.ui.View):
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="❌ Cancelled.", view=None)
         self.stop()
+
+
+class PubCameraDeleteView(discord.ui.View):
+    """View with a delete button for public camera snapshots."""
+
+    def __init__(self, printer_id: int, caller_id: int):
+        super().__init__(timeout=None)
+        self.printer_id = printer_id
+        self.caller_id = caller_id
+
+    @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only the caller of the command can delete the public page
+        if interaction.user.id == self.caller_id:
+            await interaction.message.delete()
+        else:
+            await interaction.response.send_message("❌ Only the caller of this command can delete this message.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

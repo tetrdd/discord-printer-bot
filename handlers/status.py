@@ -164,7 +164,7 @@ class StatusCog(commands.Cog):
 
         # If printer is private or unlisted, show warning confirmation view ephemerally
         if printer['privacy'] in ('private', 'unlisted'):
-            view = PubStatusConfirmView(owner_id, printer, self)
+            view = PubStatusConfirmView(owner_id, printer, self, caller_id=viewer_id)
             await interaction.response.send_message(
                 f"⚠️ **Warning: Your printer privacy is set to `{printer['privacy']}`. Do you really want to open a public status page?**",
                 view=view,
@@ -178,7 +178,7 @@ class StatusCog(commands.Cog):
                 await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
                 return
             embed = self._build_status_embed(status_data, printer['name'])
-            view = PubStatusView(owner_id, active_printer_id)
+            view = PubStatusView(owner_id, active_printer_id, caller_id=viewer_id)
             await interaction.followup.send(embed=embed, view=view)
 
     async def show_main_menu(self, interaction: discord.Interaction, edit: bool = False, ephemeral: Optional[bool] = None):
@@ -520,11 +520,12 @@ class StatusView(discord.ui.View):
 class PubStatusConfirmView(discord.ui.View):
     """Confirmation view for opening a public status page."""
 
-    def __init__(self, owner_id: int, printer: dict, status_cog: StatusCog):
+    def __init__(self, owner_id: int, printer: dict, status_cog: StatusCog, caller_id: int):
         super().__init__(timeout=60)
         self.owner_id = owner_id
         self.printer = printer
         self.status_cog = status_cog
+        self.caller_id = caller_id
 
     @discord.ui.button(label="Yes, open publicly", style=discord.ButtonStyle.success)
     async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -537,7 +538,7 @@ class PubStatusConfirmView(discord.ui.View):
             return
 
         embed = self.status_cog._build_status_embed(status_data, self.printer['name'])
-        view = PubStatusView(self.owner_id, printer_id)
+        view = PubStatusView(self.owner_id, printer_id, caller_id=self.caller_id)
         await interaction.channel.send(embed=embed, view=view)
         await interaction.edit_original_response(content="✅ Public status page opened below.", view=None)
         self.stop()
@@ -551,10 +552,11 @@ class PubStatusConfirmView(discord.ui.View):
 class PubStatusView(discord.ui.View):
     """Public status view with only Refresh and Delete (no control buttons)."""
 
-    def __init__(self, user_id: int, printer_id: int):
+    def __init__(self, user_id: int, printer_id: int, caller_id: int):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.printer_id = printer_id
+        self.caller_id = caller_id
 
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -587,11 +589,11 @@ class PubStatusView(discord.ui.View):
 
     @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
     async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Only owner can delete
-        if db.is_printer_owner(interaction.user.id, self.printer_id):
+        # Only the caller of the command can delete the public page
+        if interaction.user.id == self.caller_id:
             await interaction.message.delete()
         else:
-            await interaction.response.send_message("❌ Only the printer owner can delete this message.", ephemeral=True)
+            await interaction.response.send_message("❌ Only the caller of this command can delete this message.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

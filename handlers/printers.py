@@ -72,30 +72,56 @@ class PrintersCog(commands.Cog):
 
             view = discord.ui.View(timeout=None)
 
-            # Add Select Menu to switch printer
-            select = discord.ui.Select(placeholder="Select a printer to control...")
-            for p in printers:
-                label = p['name']
-                if p['printer_id'] == active_id:
-                    label += " (Active)"
-                select.add_option(
-                    label=label,
-                    value=str(p['printer_id']),
-                    description=f"ID: {p['printer_id']} • {p['type']}"
-                )
+            own_or_authorized = [p for p in printers if db.user_can_control(user_id, p['printer_id'])]
+            public_printers = [p for p in printers if p['privacy'] == 'public' and not db.user_can_control(user_id, p['printer_id'])]
 
-            async def select_callback(interaction: discord.Interaction):
-                pid = int(select.values[0])
-                if db.set_active_printer(interaction.user.id, pid):
-                    printer = db.get_printer(pid)
-                    await interaction.response.send_message(f"✅ Now controlling **{printer['name']}**.", ephemeral=True)
-                    # Refresh the list
-                    await self.show_printers(interaction, edit=True)
-                else:
-                    await interaction.response.send_message("❌ Failed to switch printer.", ephemeral=True)
+            if own_or_authorized:
+                select_own = discord.ui.Select(placeholder="Your / Authorized Printers...")
+                for p in own_or_authorized:
+                    label = p['name']
+                    if p['printer_id'] == active_id:
+                        label += " (Active)"
+                    select_own.add_option(
+                        label=label,
+                        value=str(p['printer_id']),
+                        description=f"ID: {p['printer_id']} • {p['type']} • {p['privacy'].capitalize()}"
+                    )
 
-            select.callback = select_callback
-            view.add_item(select)
+                async def select_own_callback(interaction: discord.Interaction):
+                    pid = int(select_own.values[0])
+                    if db.set_active_printer(interaction.user.id, pid):
+                        printer = db.get_printer(pid)
+                        await interaction.response.send_message(f"✅ Now controlling **{printer['name']}**.", ephemeral=True)
+                        await self.show_printers(interaction, edit=True)
+                    else:
+                        await interaction.response.send_message("❌ Failed to switch printer.", ephemeral=True)
+
+                select_own.callback = select_own_callback
+                view.add_item(select_own)
+
+            if public_printers:
+                select_pub = discord.ui.Select(placeholder="Other Public Printers...")
+                for p in public_printers:
+                    label = p['name']
+                    if p['printer_id'] == active_id:
+                        label += " (Active)"
+                    select_pub.add_option(
+                        label=label,
+                        value=str(p['printer_id']),
+                        description=f"ID: {p['printer_id']} • {p['type']}"
+                    )
+
+                async def select_pub_callback(interaction: discord.Interaction):
+                    pid = int(select_pub.values[0])
+                    if db.set_active_printer(interaction.user.id, pid):
+                        printer = db.get_printer(pid)
+                        await interaction.response.send_message(f"✅ Now controlling **{printer['name']}**.", ephemeral=True)
+                        await self.show_printers(interaction, edit=True)
+                    else:
+                        await interaction.response.send_message("❌ Failed to switch printer.", ephemeral=True)
+
+                select_pub.callback = select_pub_callback
+                view.add_item(select_pub)
 
             view.add_item(discord.ui.Button(label="⬅️ Back", style=discord.ButtonStyle.secondary, custom_id="back_to_menu"))
 
