@@ -132,10 +132,56 @@ class StatusCog(commands.Cog):
     
     @app_commands.command(name="menu", description="Show main menu")
     async def menu(self, interaction: discord.Interaction):
-        """Show the main menu."""
+        """Show the main menu dynamically based on printer privacy."""
         await self.show_main_menu(interaction)
 
-    async def show_main_menu(self, interaction: discord.Interaction, edit: bool = False):
+    @app_commands.command(name="privmenu", description="Show main menu privately")
+    async def privmenu(self, interaction: discord.Interaction):
+        """Show the main menu privately (always ephemeral)."""
+        await self.show_main_menu(interaction, ephemeral=True)
+
+    @app_commands.command(name="pubstatus", description="Get printer status publicly (with a warning if printer is private)")
+    async def pubstatus(self, interaction: discord.Interaction):
+        """Show current printer status publicly, prompting a warning if the printer is private/unlisted."""
+        viewer_id = interaction.user.id
+        active_printer_id = db.get_active_printer_id(viewer_id)
+
+        if active_printer_id is None:
+            await interaction.response.send_message("❌ No active printer. Use `/register-printer` or `/switch-printer`.", ephemeral=True)
+            return
+
+        printer = db.get_printer(active_printer_id)
+        if not printer:
+            await interaction.response.send_message("❌ Printer not found.", ephemeral=True)
+            return
+
+        owner_id = printer['owner_discord_id']
+
+        # Only owner/allowed can initiate pubstatus
+        if not db.user_can_control(viewer_id, active_printer_id):
+            await interaction.response.send_message("❌ You don't have permission to share this printer status publicly.", ephemeral=True)
+            return
+
+        # If printer is private or unlisted, show warning confirmation view ephemerally
+        if printer['privacy'] in ('private', 'unlisted'):
+            view = PubStatusConfirmView(owner_id, printer, self)
+            await interaction.response.send_message(
+                f"⚠️ **Warning: Your printer privacy is set to `{printer['privacy']}`. Do you really want to open a public status page?**",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            # Already public, just send status publicly directly
+            await interaction.response.defer(ephemeral=False)
+            status_data = await api.printer_status(owner_id, active_printer_id)
+            if not status_data:
+                await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
+                return
+            embed = self._build_status_embed(status_data, printer['name'])
+            view = PubStatusView(owner_id, active_printer_id)
+            await interaction.followup.send(embed=embed, view=view)
+
+    async def show_main_menu(self, interaction: discord.Interaction, edit: bool = False, ephemeral: Optional[bool] = None):
         """Helper to show or edit the main menu."""
         user_id = interaction.user.id
         active_printer_id = db.get_active_printer_id(user_id)
@@ -144,6 +190,13 @@ class StatusCog(commands.Cog):
         active_printer = db.get_active_printer(user_id)
         printer_name = active_printer['name'] if active_printer else "Printer"
         
+        # Determine ephemeral dynamically if not explicitly specified
+        if ephemeral is None:
+            if active_printer:
+                ephemeral = active_printer['privacy'] in ('private', 'unlisted')
+            else:
+                ephemeral = True
+
         embed = discord.Embed(
             title=f"🖨️ {printer_name}",
             description="Select an option:",
@@ -155,7 +208,7 @@ class StatusCog(commands.Cog):
         if edit:
             await interaction.response.edit_message(embed=embed, view=view)
         else:
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=ephemeral)
     
     def _build_status_embed(self, status: dict, printer_name: str) -> discord.Embed:
         """Build a status embed from printer data."""
@@ -454,6 +507,83 @@ class StatusView(discord.ui.View):
         cog = interaction.client.get_cog("StatusCog")
         if cog:
             await cog.show_main_menu(interaction, edit=True)
+
+    @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only owner can delete
+        if db.is_printer_owner(interaction.user.id, self.printer_id):
+            await interaction.message.delete()
+        else:
+            await interaction.response.send_message("❌ Only the printer owner can delete this message.", ephemeral=True)
+
+
+class PubStatusConfirmView(discord.ui.View):
+    """Confirmation view for opening a public status page."""
+
+    def __init__(self, owner_id: int, printer: dict, status_cog: StatusCog):
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+        self.printer = printer
+        self.status_cog = status_cog
+
+    @discord.ui.button(label="Yes, open publicly", style=discord.ButtonStyle.success)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        printer_id = self.printer['printer_id']
+        status_data = await api.printer_status(self.owner_id, printer_id)
+        if not status_data:
+            await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
+            self.stop()
+            return
+
+        embed = self.status_cog._build_status_embed(status_data, self.printer['name'])
+        view = PubStatusView(self.owner_id, printer_id)
+        await interaction.channel.send(embed=embed, view=view)
+        await interaction.edit_original_response(content="✅ Public status page opened below.", view=None)
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❌ Cancelled.", view=None)
+        self.stop()
+
+
+class PubStatusView(discord.ui.View):
+    """Public status view with only Refresh and Delete (no control buttons)."""
+
+    def __init__(self, user_id: int, printer_id: int):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+        self.printer_id = printer_id
+
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        printer = db.get_printer(self.printer_id)
+        if not printer:
+            await interaction.response.send_message("Printer not found.", ephemeral=True)
+            return
+
+        # Permissions check for refresh
+        can_refresh = (printer['privacy'] == 'public') or \
+                      db.user_can_control(interaction.user.id, self.printer_id)
+
+        if not can_refresh:
+            await interaction.response.send_message("❌ You don't have permission to refresh this status.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        status_data = await api.printer_status(self.user_id, self.printer_id)
+        printer_name = printer['name']
+
+        if not status_data:
+            await interaction.followup.send("❌ Could not connect to printer.", ephemeral=True)
+            return
+
+        cog = interaction.client.get_cog("StatusCog")
+        if cog:
+            embed = cog._build_status_embed(status_data, printer_name)
+            await interaction.edit_original_response(embed=embed)
 
     @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
     async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
